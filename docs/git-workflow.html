@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Git 작업 방식</title>
+<style>
+:root {
+  --bg: #f7f7f5; --card: #ffffff; --text: #1f2328; --muted: #5f6368; --line: #e3e3e0;
+  --main: #d1495b; --dev: #2e86ab; --feat: #3c9d5d; --code-bg: #f0f0ec;
+}
+@media (prefers-color-scheme: dark) {
+  :root { --bg: #16181c; --card: #1f2227; --text: #e8e8e6; --muted: #a0a4ab; --line: #33363c;
+          --main: #ef6f7f; --dev: #5fb0d6; --feat: #6cc58a; --code-bg: #2a2d33; }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text);
+  font: 16px/1.65 "Pretendard", "Apple SD Gothic Neo", "Malgun Gothic", system-ui, sans-serif; }
+main { max-width: 860px; margin: 0 auto; padding: 40px 16px 80px; }
+h1 { font-size: 30px; margin: 0 0 6px; }
+.sub { color: var(--muted); margin: 0 0 32px; }
+section { background: var(--card); border: 1px solid var(--line); border-radius: 12px;
+  padding: 24px; margin-bottom: 20px; }
+h2 { font-size: 20px; margin: 0 0 14px; }
+h2 .n { color: var(--muted); font-weight: 500; margin-right: 6px; }
+table { width: 100%; border-collapse: collapse; font-size: 15px; }
+th, td { text-align: left; padding: 10px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { color: var(--muted); font-weight: 600; }
+code { background: var(--code-bg); padding: 2px 6px; border-radius: 5px; font-size: 14px;
+  font-family: ui-monospace, Consolas, monospace; }
+pre { background: var(--code-bg); padding: 14px 16px; border-radius: 8px; overflow-x: auto; margin: 8px 0 0;
+  font: 14px/1.6 ui-monospace, Consolas, monospace; }
+.dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 6px; }
+.diagram { width: 100%; height: auto; display: block; }
+ol.steps { list-style: none; padding: 0; margin: 0; counter-reset: s; }
+ol.steps li { counter-increment: s; position: relative; padding: 0 0 18px 44px; }
+ol.steps li::before { content: counter(s); position: absolute; left: 0; top: 0; width: 30px; height: 30px;
+  border-radius: 50%; background: var(--dev); color: #fff; font-weight: 700; display: grid; place-items: center; }
+ol.steps li b { display: block; }
+ul.warn { margin: 0; padding-left: 20px; }
+ul.warn li { margin-bottom: 6px; }
+.table-wrap { overflow-x: auto; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Git 작업 방식</h1>
+  <p class="sub">rokey_team_ai_workspace · Git Flow 간소화</p>
+
+  <section>
+    <h2><span class="n">01</span>브랜치 구조</h2>
+    <svg class="diagram" viewBox="0 0 760 210" role="img" aria-label="main, develop, feature 브랜치 흐름도">
+      <g font-size="14" font-family="system-ui, sans-serif" fill="var(--text)">
+        <text x="0" y="44">main</text><text x="0" y="114">develop</text><text x="0" y="184">사용자명_기능명</text>
+      </g>
+      <g stroke-width="4" fill="none">
+        <line x1="90" y1="40" x2="750" y2="40" stroke="var(--main)"/>
+        <line x1="90" y1="110" x2="750" y2="110" stroke="var(--dev)"/>
+        <path d="M130 40 L170 110" stroke="var(--dev)"/>
+        <path d="M230 110 L270 180 L370 180 L410 110" stroke="var(--feat)"/>
+        <path d="M450 110 L490 180 L560 180 L600 110" stroke="var(--feat)"/>
+        <path d="M640 110 L680 40" stroke="var(--main)"/>
+      </g>
+      <g stroke="var(--card)" stroke-width="3">
+        <circle cx="130" cy="40" r="9" fill="var(--main)"/><circle cx="680" cy="40" r="9" fill="var(--main)"/>
+        <circle cx="170" cy="110" r="9" fill="var(--dev)"/><circle cx="410" cy="110" r="9" fill="var(--dev)"/>
+        <circle cx="600" cy="110" r="9" fill="var(--dev)"/>
+        <circle cx="270" cy="180" r="8" fill="var(--feat)"/><circle cx="320" cy="180" r="8" fill="var(--feat)"/>
+        <circle cx="370" cy="180" r="8" fill="var(--feat)"/><circle cx="490" cy="180" r="8" fill="var(--feat)"/>
+        <circle cx="560" cy="180" r="8" fill="var(--feat)"/>
+      </g>
+      <g font-size="12" font-family="system-ui, sans-serif" fill="var(--muted)" text-anchor="middle">
+        <text x="320" y="204">기능 A 작업</text><text x="525" y="204">기능 B 작업</text>
+        <text x="410" y="96">PR 병합</text><text x="600" y="96">PR 병합</text><text x="680" y="26">릴리스</text>
+      </g>
+    </svg>
+    <div class="table-wrap">
+    <table>
+      <tr><th>브랜치</th><th>용도</th><th>규칙</th></tr>
+      <tr><td><span class="dot" style="background:var(--main)"></span><code>main</code></td><td>배포·제출용 안정 버전</td><td>직접 push 금지, <code>develop</code>에서만 병합</td></tr>
+      <tr><td><span class="dot" style="background:var(--dev)"></span><code>develop</code></td><td>개발 통합 브랜치</td><td>직접 push 금지, <code>사용자명_기능명</code>를 PR로 병합</td></tr>
+      <tr><td><span class="dot" style="background:var(--feat)"></span><code>사용자명_기능명</code></td><td>기능 단위 작업</td><td><code>develop</code>에서 분기 → 작업 → <code>develop</code>으로 PR</td></tr>
+    </table>
+    </div>
+  </section>
+
+  <section>
+    <h2><span class="n">02</span>브랜치 이름 규칙</h2>
+    <ul class="warn">
+      <li><code>&lt;사용자명&gt;_&lt;기능명&gt;</code> 형식 (예: <code>hong_login</code>, <code>kim_yolo-detect</code>)</li>
+      <li>버그 수정도 같은 형식 (예: <code>hong_camera-fix</code>)</li>
+      <li>영어 소문자, 사용자명과 기능명은 <code>_</code>, 기능명 안의 단어는 <code>-</code>로 연결</li>
+    </ul>
+  </section>
+
+  <section>
+    <h2><span class="n">03</span>작업 순서</h2>
+    <ol class="steps">
+      <li><b>최신 develop 받기</b><pre>git checkout develop
+git pull origin develop</pre></li>
+      <li><b>기능 브랜치 만들기</b><pre>git checkout -b 사용자명_기능명</pre></li>
+      <li><b>작업 후 커밋</b><pre>git add .
+git commit -m "기능명: 설명"</pre></li>
+      <li><b>원격에 올리기</b><pre>git push origin 사용자명_기능명</pre></li>
+      <li><b>Pull Request 생성</b>GitHub에서 <code>사용자명_기능명</code> → <code>develop</code> PR 생성, 팀원 1명 이상 리뷰 후 병합</li>
+      <li><b>병합 후 로컬 정리</b><pre>git checkout develop
+git pull origin develop
+git branch -d 사용자명_기능명</pre></li>
+    </ol>
+  </section>
+
+  <section>
+    <h2><span class="n">04</span>작업 중 develop 변경사항 반영</h2>
+    <pre>git checkout 사용자명_기능명
+git pull origin develop   # 충돌 나면 해결 후 커밋</pre>
+  </section>
+
+  <section>
+    <h2><span class="n">05</span>커밋 메시지 규칙</h2>
+    <p style="margin-top:0"><code>&lt;기능명&gt;: &lt;설명&gt;</code> 형식</p>
+    <table>
+      <tr><th>항목</th><th>의미</th></tr>
+      <tr><td><code>기능명</code></td><td>작업한 기능 (브랜치의 기능명과 맞추기)</td></tr>
+      <tr><td><code>설명</code></td><td>무엇을 했는지 한 줄로</td></tr>
+    </table>
+    <p>예: <code>login: 로그인 화면 추가</code>, <code>yolo-detect: 사람 인식 정확도 개선</code></p>
+  </section>
+
+  <section>
+    <h2><span class="n">06</span>릴리스 (develop → main)</h2>
+    <ul class="warn">
+      <li>기능이 모여 안정화되면 <code>develop</code> → <code>main</code> PR 생성</li>
+      <li>팀 전체 확인 후 병합</li>
+    </ul>
+  </section>
+
+  <section>
+    <h2><span class="n">07</span>주의사항</h2>
+    <ul class="warn">
+      <li><code>main</code>, <code>develop</code>에 직접 push 하지 않기</li>
+      <li>작업 시작 전 항상 <code>git pull</code></li>
+      <li>비밀번호·API 키 커밋 금지 (<code>.env</code>는 <code>.gitignore</code>에 추가)</li>
+    </ul>
+  </section>
+</main>
+</body>
+</html>
