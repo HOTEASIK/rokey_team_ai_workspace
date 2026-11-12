@@ -1,0 +1,273 @@
+## Title : m0609_pick_3
+## Time : 2026-11-11 19:31:33
+Global_task_num = 0
+
+
+def pick_place1():
+    global System_gear_a
+    global System_gear_b
+    global System_gear_c
+    global System_gear_d
+    global Global_task_num
+    # CallNode
+    global _alias_sub_name_cc
+    _alias_sub_name_cc()
+    # MoveJNode
+    movej(posj(-6.45, 13.78, 92.47, -0.09, 74.52, 0.00), radius=0.00, ra=DR_MV_RA_DUPLICATE)
+    # ComplianceNode
+    task_compliance_ctrl()
+    set_stiffnessx([3000.00, 3000.00, 3000.00, 200.00, 200.00, 200.00],time=0.0)
+    # ForceNode
+    set_desired_force([0.00, 0.00, -50.00, 0.00, 0.00, 0.00],[0,0,1,0,0,0],time=0.0,mod=DR_FC_MOD_REL)
+    # IfBlockNode
+    if check_force_condition(axis=DR_AXIS_Z, min=10,max=15, ref=DR_TOOL):
+        pass
+    else:
+        global _alias_sub_name_oo
+        _alias_sub_name_oo()
+        global _alias_sub_name_cc
+        _alias_sub_name_cc()
+        
+    # WaitNode
+    wait(2.00)
+    # ForceNode
+    release_force(time=0.0)
+    # ComplianceNode
+    release_compliance_ctrl()
+    # MoveJNode
+    movej(posj(-6.45, 13.78, 92.47, -0.09, 74.52, 0.00), radius=0.00, ra=DR_MV_RA_DUPLICATE)
+    # MoveJNode
+    movej(posj(-21.35, -14.73, 112.64, -1.04, 82.18, 0.15), radius=0.00, ra=DR_MV_RA_DUPLICATE)
+    # ComplianceNode
+    task_compliance_ctrl()
+    set_stiffnessx([3000.00, 3000.00, 3000.00, 200.00, 200.00, 200.00],time=0.0)
+    # ForceNode
+    set_desired_force([0.00, 0.00, -80.00, 0.00, 0.00, 0.00],[0,0,1,0,0,0],time=0.0,mod=DR_FC_MOD_REL)
+    # WaitNode
+    wait(5.00)
+    # ForceNode
+    release_force(time=0.0)
+    # ComplianceNode
+    release_compliance_ctrl()
+    # CallNode
+    global _alias_sub_name_oo
+    _alias_sub_name_oo()
+    # MoveJNode
+    movej(posj(-21.35, -14.73, 112.64, -1.04, 82.18, 0.15), radius=0.00, ra=DR_MV_RA_DUPLICATE)
+    
+_alias_sub_name_pick_place1 = pick_place1
+
+def pick_place2():
+    global System_gear_a
+    global System_gear_b
+    global System_gear_c
+    global System_gear_d
+    global Global_task_num
+    # CallNode
+    global _alias_sub_name_cc
+    _alias_sub_name_cc()
+    # MoveJNode
+    movej(posj(-4.03, 28.63, 71.93, -0.07, 80.02, 2.23), radius=0.00, ra=DR_MV_RA_DUPLICATE)
+    # ComplianceNode
+    task_compliance_ctrl()
+    set_stiffnessx([3000.00, 3000.00, 3000.00, 200.00, 200.00, 200.00],time=0.0)
+    # ForceNode
+    set_desired_force([0.00, 0.00, -50.00, 0.00, 0.00, 0.00],[0,0,1,0,0,0],time=0.0,mod=DR_FC_MOD_REL)
+    # IfBlockNode
+    if check_force_condition(axis=DR_AXIS_Z, min=10,max=15, ref=DR_TOOL):
+        pass
+    else:
+        global _alias_sub_name_oo
+        _alias_sub_name_oo()
+        global _alias_sub_name_cc
+        _alias_sub_name_cc()
+        
+    # WaitNode
+    wait(2.00)
+    # ForceNode
+    release_force(time=0.0)
+    # ComplianceNode
+    release_compliance_ctrl()
+    # MoveJNode
+    movej(posj(-3.97, 27.60, 58.07, -0.07, 94.76, 2.24), radius=0.00, ra=DR_MV_RA_DUPLICATE)
+    # MoveJNode
+    movej(posj(-23.88, 1.25, 100.42, -0.18, 78.31, -23.37), radius=0.00, ra=DR_MV_RA_DUPLICATE)
+    # ComplianceNode
+    task_compliance_ctrl()
+    set_stiffnessx([3000.00, 3000.00, 3000.00, 200.00, 200.00, 200.00],time=0.0)
+    # ForceNode
+    set_desired_force([0.00, 0.00, -80.00, 0.00, 0.00, 0.00],[0,0,1,0,0,0],time=0.0,mod=DR_FC_MOD_REL)
+    # WaitNode
+    wait(5.00)
+    # ForceNode
+    release_force(time=0.0)
+    # ComplianceNode
+    release_compliance_ctrl()
+    # CallNode
+    global _alias_sub_name_oo
+    _alias_sub_name_oo()
+    # MoveJNode
+    movej(posj(-23.88, 1.25, 100.42, -0.18, 78.31, -23.37), radius=0.00, ra=DR_MV_RA_DUPLICATE)
+    
+_alias_sub_name_pick_place2 = pick_place2
+
+def oo():
+    global System_gear_a
+    global System_gear_b
+    global System_gear_c
+    global System_gear_d
+    global Global_task_num
+    # SetNode
+    set_digital_output(1,OFF)
+    # SetNode
+    set_digital_output(2,ON)
+    # WaitNode
+    wait(1.00)
+    
+_alias_sub_name_oo = oo
+
+def pick_place3():
+    global System_gear_a
+    global System_gear_b
+    global System_gear_c
+    global System_gear_d
+    global Global_task_num
+    # CallNode
+    global _alias_sub_name_cc
+    _alias_sub_name_cc()
+    # MoveJNode
+    movej(posj(-15.27, 23.73, 79.40, -0.12, 77.53, -8.73), radius=0.00, ra=DR_MV_RA_DUPLICATE)
+    # ComplianceNode
+    task_compliance_ctrl()
+    set_stiffnessx([3000.00, 3000.00, 3000.00, 200.00, 200.00, 200.00],time=0.0)
+    # ForceNode
+    set_desired_force([0.00, 0.00, -50.00, 0.00, 0.00, 0.00],[0,0,1,0,0,0],time=0.0,mod=DR_FC_MOD_REL)
+    # IfBlockNode
+    if check_force_condition(axis=DR_AXIS_Z, min=10,max=15, ref=DR_TOOL):
+        pass
+    else:
+        global _alias_sub_name_oo
+        _alias_sub_name_oo()
+        global _alias_sub_name_cc
+        _alias_sub_name_cc()
+        
+    # WaitNode
+    wait(2.00)
+    # ForceNode
+    release_force(time=0.0)
+    # ComplianceNode
+    release_compliance_ctrl()
+    # MoveJNode
+    movej(posj(-15.27, 23.73, 79.40, -0.12, 77.53, -8.73), radius=0.00, ra=DR_MV_RA_DUPLICATE)
+    # MoveJNode
+    movej(posj(-39.13, -3.74, 112.32, -0.51, 72.26, -32.48), radius=0.00, ra=DR_MV_RA_DUPLICATE)
+    # ComplianceNode
+    task_compliance_ctrl()
+    set_stiffnessx([3000.00, 3000.00, 3000.00, 200.00, 200.00, 200.00],time=0.0)
+    # ForceNode
+    set_desired_force([0.00, 0.00, -80.00, 0.00, 0.00, 0.00],[0,0,1,0,0,0],time=0.0,mod=DR_FC_MOD_REL)
+    # WaitNode
+    wait(5.00)
+    # ForceNode
+    release_force(time=0.0)
+    # ComplianceNode
+    release_compliance_ctrl()
+    # CallNode
+    global _alias_sub_name_oo
+    _alias_sub_name_oo()
+    # MoveJNode
+    movej(posj(-39.13, -3.74, 112.32, -0.51, 72.26, -32.48), radius=0.00, ra=DR_MV_RA_DUPLICATE)
+    
+_alias_sub_name_pick_place3 = pick_place3
+
+def pick_place4():
+    global System_gear_a
+    global System_gear_b
+    global System_gear_c
+    global System_gear_d
+    global Global_task_num
+    # CallNode
+    global _alias_sub_name_cc
+    _alias_sub_name_cc()
+    # MoveLNode
+    movel(posx(500.65, -76.26, 130.00, 176.68, 179.11, -176.23), radius=0.00, ref=0, mod=DR_MV_MOD_ABS, ra=DR_MV_RA_DUPLICATE, app_type=DR_MV_APP_NONE)
+    # ComplianceNode
+    task_compliance_ctrl()
+    set_stiffnessx([3000.00, 3000.00, 3000.00, 200.00, 200.00, 200.00],time=0.0)
+    # ForceNode
+    set_desired_force([0.00, 0.00, -50.00, 0.00, 0.00, 0.00],[0,0,1,0,0,0],time=0.0,mod=DR_FC_MOD_REL)
+    # IfBlockNode
+    if check_force_condition(axis=DR_AXIS_Z, min=10,max=15, ref=DR_TOOL):
+        pass
+    else:
+        global _alias_sub_name_oo
+        _alias_sub_name_oo()
+        global _alias_sub_name_cc
+        _alias_sub_name_cc()
+        
+    # WaitNode
+    wait(2.00)
+    # ForceNode
+    release_force(time=0.0)
+    # ComplianceNode
+    release_compliance_ctrl()
+    # MoveLNode
+    movel(posx(499.95, -76.48, 130.00, 176.51, 178.95, -176.39), radius=0.00, ref=0, mod=DR_MV_MOD_ABS, ra=DR_MV_RA_DUPLICATE, app_type=DR_MV_APP_NONE)
+    # MoveLNode
+    movel(posx(277.89, -152.46, 150.00, 169.31, 178.82, 176.40), radius=0.00, ref=0, mod=DR_MV_MOD_ABS, ra=DR_MV_RA_DUPLICATE, app_type=DR_MV_APP_NONE)
+    # ComplianceNode
+    task_compliance_ctrl()
+    set_stiffnessx([3000.00, 3000.00, 3000.00, 200.00, 200.00, 200.00],time=0.0)
+    # ForceNode
+    set_desired_force([0.00, 0.00, -80.00, 0.00, 0.00, 0.00],[0,0,1,0,0,0],time=0.0,mod=DR_FC_MOD_REL)
+    # WaitNode
+    wait(5.00)
+    # ForceNode
+    release_force(time=0.0)
+    # ComplianceNode
+    release_compliance_ctrl()
+    # MovePeriodicNode
+    move_periodic(amp=[0.00, 0.00, 0.00, 0.00, 0.00, 50.00], period=[0.00, 0.00, 0.00, 0.00, 0.00, 5.00], atime=0.00, repeat=3, ref=1)
+    # CallNode
+    global _alias_sub_name_oo
+    _alias_sub_name_oo()
+    # MoveLNode
+    movel(posx(277.89, -152.46, 98.57, 169.31, 178.82, 176.40), radius=0.00, ref=0, mod=DR_MV_MOD_ABS, ra=DR_MV_RA_DUPLICATE, app_type=DR_MV_APP_NONE)
+    
+_alias_sub_name_pick_place4 = pick_place4
+
+def cc():
+    global System_gear_a
+    global System_gear_b
+    global System_gear_c
+    global System_gear_d
+    global Global_task_num
+    # SetNode
+    set_digital_output(1,ON)
+    # SetNode
+    set_digital_output(2,OFF)
+    # WaitNode
+    wait(1.00)
+    
+_alias_sub_name_cc = cc
+
+set_singular_handling(DR_AVOID)
+set_velj(60.0)
+set_accj(100.0)
+set_velx(250.0, 80.625, DR_OFF)
+set_accx(1000.0, 322.5)
+gLoop193133368 = 0
+while gLoop193133368 < 1:
+    # MoveJNode
+    movej(posj(0.00, 0.01, 90.01, 0.00, 90.00, 0.00), radius=0.00, ra=DR_MV_RA_DUPLICATE)
+    # CallNode
+    _alias_sub_name_pick_place1()
+    # CallNode
+    _alias_sub_name_pick_place2()
+    # CallNode
+    _alias_sub_name_pick_place3()
+    # CallNode
+    _alias_sub_name_pick_place4()
+    # MoveJNode
+    movej(posj(0.00, 0.01, 90.01, 0.00, 90.00, 0.00), radius=0.00, ra=DR_MV_RA_DUPLICATE)
+    gLoop193133368 = gLoop193133368 + 1
