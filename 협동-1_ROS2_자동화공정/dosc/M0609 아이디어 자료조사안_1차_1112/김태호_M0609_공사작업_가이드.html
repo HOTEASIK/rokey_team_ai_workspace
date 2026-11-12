@@ -1,0 +1,640 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>M0609 공사로봇 가이드</title>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10.9.1/dist/mermaid.min.js"></script>
+<style>
+:root{--bg:#f6f7f9;--card:#fff;--ink:#1d2330;--sub:#5b6475;--line:#dde1e8;--accent:#e8740c;--accent2:#2563eb;--ok:#15803d;--warn:#b91c1c;--soft:#fff4e8}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:'Malgun Gothic','Apple SD Gothic Neo',sans-serif;line-height:1.65;font-size:15px}
+nav{position:sticky;top:0;z-index:10;background:#1d2330;padding:10px 16px;display:flex;gap:6px;flex-wrap:wrap}
+nav a{color:#fff;text-decoration:none;font-size:13px;padding:5px 10px;border-radius:14px;background:#343c4f}
+nav a:hover{background:var(--accent)}
+main{max-width:1000px;margin:0 auto;padding:24px 16px 80px}
+header{padding:28px 0 8px}
+header h1{margin:0;font-size:28px}
+header p{color:var(--sub);margin:6px 0 0}
+section{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:22px 24px;margin:22px 0}
+h2{margin:0 0 4px;font-size:22px}
+h2 .no{display:inline-block;background:var(--accent);color:#fff;border-radius:8px;padding:0 10px;margin-right:8px;font-size:18px}
+h3{margin:22px 0 8px;font-size:16px;color:var(--accent2)}
+.lead{color:var(--sub);margin:0 0 12px}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:12px}
+.card{border:1px solid var(--line);border-radius:10px;padding:14px;background:#fbfcfd}
+.card b{display:block;margin-bottom:4px}
+.card small{color:var(--sub)}
+.tag{display:inline-block;font-size:12px;padding:2px 8px;border-radius:10px;background:var(--soft);color:var(--accent);margin:0 4px 4px 0;border:1px solid #f6d2ad}
+table{border-collapse:collapse;width:100%;font-size:14px;margin:6px 0}
+th,td{border:1px solid var(--line);padding:6px 9px;text-align:left;vertical-align:top}
+th{background:#eef1f5}
+.flow{border:1px dashed var(--line);border-radius:10px;padding:12px;background:#fff;overflow-x:auto;text-align:center}
+.tip{background:var(--soft);border-left:4px solid var(--accent);padding:10px 14px;border-radius:6px;margin:12px 0}
+.warn{background:#fdecec;border-left:4px solid var(--warn);padding:10px 14px;border-radius:6px;margin:12px 0}
+ol li,ul li{margin:3px 0}
+code{background:#eef1f5;padding:1px 5px;border-radius:4px;font-size:13px}
+details{margin-top:10px}
+summary{cursor:pointer;color:var(--accent2)}
+@media (max-width:600px){section{padding:16px}header h1{font-size:22px}}
+@media print{nav{display:none}section{page-break-inside:avoid}}
+</style>
+</head>
+<body>
+<nav>
+  <a href="#plan">기획 개요</a><a href="#idea">핵심 개념</a><a href="#common">공통 흐름</a>
+  <a href="#f1">① 메시</a><a href="#f2">② 메시 퍼티</a><a href="#f3">③ 퍼티 샌딩</a>
+  <a href="#f4">④ 전체 퍼티</a><a href="#f5">⑤ 금속 샌딩</a><a href="#f6">⑥ 프라이머</a>
+  <a href="#app">앱 통신</a><a href="#safe">안전</a>
+  <a href="#poc">PoC 검증</a><a href="#hw">하드웨어</a><a href="#risk">리스크</a>
+</nav>
+<main>
+<header>
+  <h1>M0609 공사로봇 작업 가이드</h1>
+  <p>두산 협동로봇 M0609 · 카메라·AI 없이 <b>손끝 감각(접촉)과 힘의 방향</b>만으로 미장·샌딩·도장 작업하기</p>
+</header>
+
+<!-- 기획 개요 -->
+<section id="plan">
+  <h2>기획 개요</h2>
+  <p class="lead">왜 하는지, 무엇으로 성공을 판단하는지, 어떤 순서로 하는지.</p>
+  <h3>해결하려는 문제</h3>
+  <div class="grid">
+    <div class="card"><b>😷 분진 노출</b>퍼티·금속 샌딩은 분진이 심한 기피 작업 → 건강 위험, 사람 구하기 어려움</div>
+    <div class="card"><b>📏 품질 편차</b>평탄도·이음매 품질이 숙련도에 따라 다르고, 결과가 수치로 남지 않음</div>
+  </div>
+  <div class="tip"><b>1차 목표:</b> ① 작업자 분진 노출 줄이기 ② 품질을 숫자로 기록(높이 지도·이음매 지도).<br>
+  <b>인건비 절감은 1차 목표가 아닙니다.</b> 지금 범위에서는 보조 작업자 1명(재료 보충·로봇 이동·툴 교체)이 함께 있습니다.</div>
+  <h3>왜 카메라를 안 쓰나</h3>
+  <p><b>과제 조건</b>입니다 — VLA·LLM·비전 모델 사용 불가. 촉각 방식의 부가 이점: 분진·도료로 렌즈 오염, 흰 퍼티 벽은 무늬가 없어 카메라로 0.5mm 단차를 보기 어려움, 촉각은 <b>결과(평탄도)를 직접 측정</b>함.</p>
+  <h3>성공 기준</h3>
+  <table>
+    <tr><th>지표</th><th>1차 목표</th><th>측정 방법</th></tr>
+    <tr><td>샌딩 후 평탄도</td><td>0.5mm 이하</td><td>촉각 높이 지도 + 사람 2m 직자 검사</td></tr>
+    <tr><td>작업자 분진 노출 시간</td><td>사람 단독 대비 감소 (목표치 입력)</td><td>샌딩 구역 안에 있는 시간</td></tr>
+    <tr><td>사람 개입 횟수</td><td>측정 후 목표 설정</td><td>앱 WAIT_HUMAN 기록</td></tr>
+    <tr><td>작업 속도</td><td>사람과 비교 (측정 후 설정)</td><td>m²/h, 이동·대기 포함</td></tr>
+    <tr><td>이음매 탐지율 (방법 1)</td><td>95% 이상, 오탐 5% 이하</td><td>이음매 위치를 아는 시편</td></tr>
+  </table>
+  <h3>단계별 진행 — 6개를 한 번에 하지 않습니다</h3>
+  <div class="flow"><pre class="mermaid">
+flowchart LR
+  P0["0단계 PoC 2주<br>센서·감지 검증"] -->|"통과"| P1["1단계<br>③ 퍼티 샌딩<br>+ 공통 모듈"]
+  P0 -->|"실패"| FT["손목 힘센서 추가<br>후 재시험"]
+  FT --> P0
+  P1 -->|"성공 기준 달성"| P2["2단계<br>① 메시 방법 2<br>② 메시 퍼티"]
+  P2 -->|"달성"| P3["3단계<br>① 방법 1, ④ 전체 퍼티<br>⑤⑥ 금속"]
+  </pre></div>
+  <p><b>퍼티 샌딩이 1단계인 이유:</b> 사람이 가장 꺼리는 분진 작업이고, "재기 → 갈기 → 다시 재기"라 촉각만으로 결과를 숫자로 검증할 수 있으며, 공통 모듈을 거의 다 씁니다.</p>
+  <h3>예산·일정·인력 (기획자 입력)</h3>
+  <table>
+    <tr><th>항목</th><th>내용</th><th>금액/일정</th></tr>
+    <tr><td>M0609 본체</td><td>보유 여부</td><td>미정</td></tr>
+    <tr><td>그리퍼</td><td>손끝 탐색·롤러 툴 잡기</td><td>미정</td></tr>
+    <tr><td>손목 힘센서(F/T)</td><td>PoC 실패 시 플랜 B</td><td>미정 (예비비)</td></tr>
+    <tr><td>툴 제작</td><td>메시 롤러 툴, 헤라·샌더 마운트, 프라이머 롤러</td><td>미정</td></tr>
+    <tr><td>대차·고정 장치</td><td>아웃트리거, 높이 2단</td><td>미정</td></tr>
+    <tr><td>집진기·보호 커버</td><td></td><td>미정</td></tr>
+    <tr><td>시편</td><td>테이퍼/일반 석고보드, 단차 시편, 철판·배관</td><td>미정</td></tr>
+    <tr><td>인력</td><td>로봇 SW, 기구 설계, 앱</td><td>미정</td></tr>
+  </table>
+  <h3>ROI 비교표 (측정 후 채움)</h3>
+  <table>
+    <tr><th>항목</th><th>사람 단독</th><th>로봇 + 보조 1명</th></tr>
+    <tr><td>작업 속도 (m²/h)</td><td>측정</td><td>측정</td></tr>
+    <tr><td>분진 노출 (분/m²)</td><td>측정</td><td>측정</td></tr>
+    <tr><td>평탄도 편차</td><td>측정</td><td>측정</td></tr>
+    <tr><td>재작업률</td><td>측정</td><td>측정</td></tr>
+    <tr><td>품질 기록</td><td>없음</td><td>높이 지도·이음매 지도 자동 저장</td></tr>
+    <tr><td>건조 대기 중</td><td>—</td><td>앱 작업 큐로 다른 영역 작업</td></tr>
+  </table>
+</section>
+
+<!-- 핵심 개념 -->
+<section id="idea">
+  <h2>로봇은 어떻게 "느끼나?"</h2>
+  <p class="lead">M0609는 6개 관절마다 토크센서가 있어서, 툴 끝에 걸리는 <b>힘(어느 방향으로 얼마나 밀리는지)</b>을 알 수 있습니다. 눈을 감은 사람이 손으로 더듬어 벽을 찾는 것과 같습니다.</p>
+  <div class="grid">
+    <div class="card"><b>👆 찔러보기</b>천천히 다가가다 힘이 8N을 넘으면 "닿았다!" → 그 위치 기록<br><small>벽 위치·구멍·통 깊이 찾기</small></div>
+    <div class="card"><b>📐 여러 점 찍어 벽 각도 알기</b>3×3=9점을 찔러보고 평면을 계산 → 벽이 얼마나 기울었는지, 울퉁불퉁한지<br><small>모든 작업의 기준 좌표</small></div>
+    <div class="card"><b>✋ 일정한 힘으로 누르며 쓸기</b>"벽 방향으로 항상 20N" 같은 힘 제어 → 벽이 휘어도 자동으로 따라감<br><small>바르기·샌딩·롤링</small></div>
+    <div class="card"><b>⚖️ 기울기 느끼기</b>툴 한쪽만 닿으면 비틀림(토크)이 생김 → 비틀림이 0이 되게 자세 조정<br><small>툴을 면에 평평하게</small></div>
+    <div class="card"><b>🧽 마찰 느끼기</b>밀리는 힘 ÷ 누르는 힘 = 마찰. 마찰이 변하면 표면 상태가 변한 것<br><small>퍼티 소진·녹 제거 완료·사포 마모</small></div>
+    <div class="card"><b>🗺️ 높이 지도</b>일정한 힘으로 쓸 때 툴이 들어가고 나오는 깊이 = 표면 높낮이<br><small>볼록한 곳 찾기·퍼티 두께</small></div>
+  </div>
+  <div class="tip"><b>사람이 도와주는 부분:</b> 퍼티통·트레이 위치와 금속 작업 영역은 사람이 로봇 팔을 잡고 끌어서 알려줍니다(핸드가이딩). 미장 이음매(단차)는 로봇이 손끝으로 스스로 찾거나(방법 1), 사람이 시작·끝점을 찍어 줄 수 있습니다(방법 2). 재료 보충, 로봇 옮기기, 사포 교체도 앱이 요청하면 사람이 합니다.</div>
+
+  <h3>작업 툴 4종</h3>
+  <table>
+    <tr><th>툴</th><th>쓰는 작업</th><th>특징</th></tr>
+    <tr><td>그리퍼</td><td>①</td><td>닫은 손끝으로 벽을 더듬어 이음매(단차)를 찾음, 메시 롤러 툴을 잡음</td></tr>
+    <tr><td>메시 롤러 툴 + 커터</td><td>①</td><td>그리퍼가 잡고, 테이프가 풀리면서 고무 롤러로 눌러 붙임, 끝에서 커터로 자름</td></tr>
+    <tr><td>헤라(퍼티 날)</td><td>②④</td><td>날 각도로 두께 조절 — 눕힐수록 두껍게, 세울수록 얇게 긁어냄</td></tr>
+    <tr><td>궤도 샌더</td><td>③⑤</td><td>신호 하나로 켜고 끔, 반드시 <b>벽에 닿은 뒤 켜고, 끈 뒤 뗌</b></td></tr>
+    <tr><td>프라이머 롤러/붓</td><td>⑥</td><td>트레이에 담갔다가 가볍게(8N) 굴림</td></tr>
+  </table>
+</section>
+
+<!-- 공통 흐름 -->
+<section id="common">
+  <h2>공통 흐름</h2>
+  <p class="lead">6개 작업 모두 아래 순서를 따릅니다.</p>
+  <h3>전체 단계</h3>
+  <div class="flow"><pre class="mermaid">
+flowchart LR
+  A["대기"] --> B["준비<br>툴 장착·힘 영점"]
+  B --> C["위치 파악<br>벽 찔러보기"]
+  C --> D["경로 계획<br>지그재그"]
+  D --> E["작업 실행"]
+  E --> F["촉각 검사"]
+  F -->|"기준 미달"| E
+  F -->|"통과"| G["완료 보고"]
+  E -.->|"재료 부족·로봇 이동"| H["사람 도움 대기"]
+  H -.->|"앱에서 완료 누름"| E
+  </pre></div>
+
+  <h3>한 번 "누르며 쓸기" 할 때의 흐름</h3>
+  <div class="flow"><pre class="mermaid">
+flowchart TD
+  A["벽 10mm 앞으로 이동"] --> B["힘 영점 잡기<br>재료 무게 빼기"]
+  B --> C["부드럽게 모드 ON<br>툴이 벽에 스스로 밀착"]
+  C --> D["벽 방향으로 목표 힘만큼 누르기"]
+  D --> E{"3초 안에<br>힘 도달?"}
+  E -->|"아니오"| X["접촉 없음<br>구멍 또는 영역 밖"]
+  E -->|"예"| F["벽 따라 좌우·상하 이동"]
+  F --> M{"힘 감시"}
+  M -->|"힘이 사라짐"| X2["끝·구멍 도착<br>위치 기록"]
+  M -->|"힘 2배 초과"| X3["돌출물 걸림<br>즉시 떼기·경고"]
+  M -->|"한쪽만 닿음"| T["비틀림 반대로<br>툴 기울기 보정"]
+  T --> F
+  M -->|"정상"| G["끝점 도착"]
+  G --> H["힘 해제 → 20mm 뒤로 떼기"]
+  </pre></div>
+
+  <h3>작업 범위와 로봇 이동</h3>
+  <p>로봇 팔 길이가 900mm라서 한 자리에서 약 <b>600×600mm</b>씩 작업합니다. 벽이 넓으면 앱이 "로봇을 오른쪽으로 550mm 옮겨주세요"라고 안내하고, 옮긴 뒤 벽을 다시 찔러서 위치를 맞춥니다(구역끼리 50mm 겹침).</p>
+</section>
+
+<!-- 기능 1 -->
+<section id="f1">
+  <h2><span class="no">1</span>미장 — 메시 붙이기</h2>
+  <p class="lead">석고보드 <b>패널끼리 이어진 틈 = 단차가 있는 곳</b>에 메시 테이프를 붙입니다. 이후 ②에서 퍼티를 올려 평탄하게 만듭니다.</p>
+  <div class="tip"><b>원칙: "단차가 있다 → 메시를 붙인다"</b> — 이음매 위치는 두 가지 방법 중 하나로 정합니다.<br><b>단계:</b> 방법 2(사람 보조)는 2단계, 방법 1(자동 탐색)은 3단계. 자동 탐색은 시간이 길어서 이음매 지도를 기록으로 남겨야 할 때 우선 씁니다.</div>
+  <span class="tag">그리퍼 닫은 손끝 (찾기)</span><span class="tag">메시 롤러 툴 (붙이기)</span><span class="tag">손끝 5N</span><span class="tag">롤러 25N</span>
+
+  <h3>방법 1 vs 방법 2</h3>
+  <table>
+    <tr><th></th><th>방법 1 — 자동 탐색</th><th>방법 2 — 손으로 지정</th></tr>
+    <tr><td>이음매 찾기</td><td>로봇이 벽 전체를 손끝으로 훑어서 스스로 찾음</td><td>사람이 로봇 팔을 끌어 시작점·끝점을 찍음</td></tr>
+    <tr><td>사람 할 일</td><td>벽 크기·로봇 위치 입력</td><td>이음매마다 시작·끝 2점 찍기</td></tr>
+    <tr><td>시간</td><td>길다 (2.4×2.4m 벽 약 20분 탐색)</td><td>짧다 (찍은 이음매만)</td></tr>
+    <tr><td>언제 쓰나</td><td>이음매가 많거나 위치를 모를 때</td><td>몇 군데만 할 때, 단차가 얕아 자동이 놓칠 때</td></tr>
+    <tr><td>공통</td><td colspan="2">두 방법 모두 로봇이 <b>손끝으로 이음매 중심을 다시 더듬어 보정</b>한 뒤 붙입니다</td></tr>
+  </table>
+
+  <h3>흐름도</h3>
+  <div class="flow"><pre class="mermaid">
+flowchart TD
+  S["시작"] --> A["그리퍼 닫기·힘 영점<br>손끝이 탐침 역할"]
+  A --> M{"방법 선택"}
+
+  M -->|"방법 1 자동"| A1["앱에 벽 크기·로봇 위치 입력<br>600×600mm 구역으로 나눔"]
+  A1 --> A2["구역 5점 찔러보기<br>벽 각도 계산"]
+  A2 --> A3["손끝으로 300mm 간격<br>가로·세로로 긁어 훑기"]
+  A3 --> A4{"틈·단차<br>0.5mm 이상?"}
+  A4 -->|"없음"| A7
+  A4 -->|"있음"| A5{"이웃 줄에서도<br>같은 위치?"}
+  A5 -->|"아니오<br>나사머리·찍힘"| A6["점 결함 기록<br>퍼티 보수용"]
+  A6 --> A7{"남은 구역?"}
+  A5 -->|"예 = 이음매"| TR
+  A7 -->|"있음"| A8["필요하면 로봇 이동 요청"]
+  A8 --> A2
+  A7 -->|"없음"| MG["구역 경계에서 끊긴 이음매 잇기"]
+
+  M -->|"방법 2 손 지정"| B1["사람이 팔을 끌어<br>이음매 시작점·끝점 찍기<br>여러 개 반복"]
+  B1 --> B2["찍은 점 주변 3점 찔러보기<br>벽 각도 계산"]
+  B2 --> B3["시작·끝점에서 가로질러 ±40mm 긁기<br>실제 이음매 중심으로 보정"]
+  B3 --> B4{"단차 감지?"}
+  B4 -->|"못 찾음"| B5["찍은 점 그대로 사용<br>앱 경고"]
+  B4 -->|"찾음"| TR
+  B5 --> TR
+
+  TR["이음매 따라 50mm씩 이동<br>매번 가로질러 짧게 긁어 중심 보정"] --> TE{"끝?<br>자동: 단차 사라짐·벽 끝<br>손 지정: 끝점 도달"}
+  TE -->|"아니오"| TR
+  TE -->|"예 · 자동"| A7
+  TE -->|"예 · 손 지정"| MG
+
+  MG --> MP["이음매 지도 앱 전송"]
+  MP --> PK["그리퍼로 메시 롤러 툴 잡기<br>무게 바뀜 → 힘 영점"]
+  PK --> AT["이음매마다 롤러로<br>누르며 메시 붙이기"]
+  AT --> AT2{"힘 이상?"}
+  AT2 -->|"힘이 사라지거나 걸림"| H["정지·테이프 확인 요청"]
+  H -->|"사람 확인"| AT
+  AT2 -->|"정상"| CUT["끝에서 커터로 자르기"]
+  CUT --> R2["거꾸로 한 번 더 세게 압착"]
+  R2 --> R3{"들뜬 곳?<br>높이차 1mm 초과"}
+  R3 -->|"있음"| R4["그 구간 3번 왕복 압착"]
+  R4 --> X
+  R3 -->|"없음"| X{"남은 이음매?"}
+  X -->|"있음"| AT
+  X -->|"없음"| PL["롤러 툴 반납<br>빈손 그리퍼 닫기"]
+  PL --> V["손끝으로 테이프 양끝 턱 확인<br>테이프 중심이 이음매에서 5mm 이내?"]
+  V --> E["완료 보고<br>이음매 수·길이·점 결함"]
+  </pre></div>
+
+  <h3>쉽게 말하면 — 방법 1 (자동 탐색)</h3>
+  <ol>
+    <li>로봇이 <b>그리퍼를 닫은 손끝</b>으로 벽을 가로·세로로 살살 긁고 다닙니다.</li>
+    <li>손끝이 <b>쑥 빠지는 곳(틈)</b>이나 <b>턱에 걸리는 곳(단차)</b>을 표시합니다.</li>
+    <li>옆 줄에서도 같은 자리에 있으면 이음매, 한 곳만 있으면 나사머리나 찍힘으로 봅니다.</li>
+    <li>이음매를 따라가며 끝까지 추적해 <b>시작점·끝점을 스스로 정합니다.</b></li>
+  </ol>
+  <h3>쉽게 말하면 — 방법 2 (손으로 지정)</h3>
+  <ol>
+    <li>사람이 로봇 팔을 잡고 닫힌 손끝을 이음매 <b>시작점에 대고 저장, 끝점에 대고 저장</b>합니다.</li>
+    <li>사람 손은 조금 어긋날 수 있으니, 로봇이 찍은 점 주변을 가로질러 긁어 <b>진짜 이음매 중심으로 옮깁니다.</b></li>
+    <li>시작에서 끝까지 이음매를 따라가며 중간도 보정합니다.</li>
+  </ol>
+  <h3>붙이기 (두 방법 공통)</h3>
+  <ol>
+    <li>그리퍼가 거치대의 메시 롤러 툴을 잡습니다.</li>
+    <li>이음매마다 롤러로 눌러 붙이고, 끝에서 커터로 자르고, 거꾸로 한 번 더 눌러 들뜬 곳을 찾습니다.</li>
+    <li>툴을 반납하고 빈손 손끝으로 메시가 이음매 가운데에 붙었는지 확인합니다.</li>
+  </ol>
+
+  <h3>그리퍼 손끝으로 더듬는 요령</h3>
+  <ul>
+    <li>닫힌 손가락 끝의 <b>선(모서리)이 이음매와 평행</b>하게 → 좁은 틈에 손끝이 선 전체로 빠져서 잘 느껴집니다.<br>
+      세로 이음매를 찾을 땐 손끝 선을 세로로, 가로 이음매를 찾을 땐 손목을 90° 돌립니다.</li>
+    <li>손끝을 진행 방향 뒤로 10° 눕혀 턱에 걸려 튀지 않게 합니다.</li>
+    <li>5N 이하로 눌러 석고보드 종이가 긁히지 않게 합니다.</li>
+  </ul>
+  <table>
+    <tr><th>느낌</th><th>판정</th></tr>
+    <tr><td>폭 2~15mm가 0.5mm 이상 쑥 들어갔다 나옴</td><td>틈 → 이음매</td></tr>
+    <tr><td>한쪽이 0.5mm 이상 높고 돌아오지 않음 (올라갈 때 턱에 걸리는 힘)</td><td>단차 → 이음매</td></tr>
+    <tr><td>폭 40~150mm가 좌우 대칭으로 완만히 들어가고, 옆 줄에서도 같은 자리에 이어짐</td><td>테이퍼 이음매 → 이음매 (가장 깊은 곳이 중심)</td></tr>
+    <tr><td>150mm보다 넓거나, 옆 줄과 이어지지 않는 완만한 오목</td><td>벽 휨 → 무시</td></tr>
+    <tr><td>옆 줄에 이어지지 않는 한 점</td><td>나사머리·찍힘 → 퍼티 보수 목록</td></tr>
+  </table>
+  <div class="tip">손끝 모서리가 둥글면(R 1.5mm 초과) 3mm 틈에 덜 빠집니다. 그래도 높이 계단과 걸림 힘으로 단차는 판정할 수 있고, 감도가 부족하면 각진 손끝 패드로 교체합니다.</div>
+
+  <details><summary>파라미터</summary>
+  <table><tr><th>이름</th><th>기본값</th><th>설명</th></tr>
+  <tr><td>find_mode</td><td>AUTO</td><td>AUTO(방법 1) / MANUAL(방법 2)</td></tr>
+  <tr><td>wall_area</td><td>입력</td><td>방법 1: 탐색할 벽 크기</td></tr>
+  <tr><td>scan_spacing</td><td>300 mm</td><td>방법 1: 훑는 줄 간격</td></tr>
+  <tr><td>taught_seams</td><td>티칭</td><td>방법 2: 이음매별 시작·끝점</td></tr>
+  <tr><td>finger_force</td><td>5 N</td><td>손끝 누름 힘</td></tr>
+  <tr><td>seam_min</td><td>0.5 mm</td><td>이음매로 볼 최소 깊이·단차</td></tr>
+  <tr><td>press_force</td><td>25 N</td><td>롤러 누름 힘 (재압착은 1.2배)</td></tr>
+  <tr><td>speed</td><td>40 mm/s</td><td>붙이는 속도 (재압착은 1.5배)</td></tr></table></details>
+  <p><small>방법 1에서 0.5mm보다 얕은 이음매는 놓칠 수 있습니다 → 앱 이음매 지도로 확인 후 seam_min을 낮춰 재탐색하거나 방법 2로 추가 지정합니다.</small></p>
+</section>
+
+<!-- 기능 2 -->
+<section id="f2">
+  <h2><span class="no">2</span>미장 — 메시 위 퍼티 올리기</h2>
+  <p class="lead">붙인 메시 위에 퍼티를 덮고, 양옆을 얇게 펴서 단차가 안 보이게 만듭니다.</p>
+  <span class="tag">헤라</span><span class="tag">덮기 35° 15N</span><span class="tag">펴기 55° 30N</span>
+  <h3>흐름도</h3>
+  <div class="flow"><pre class="mermaid">
+flowchart TD
+  S["시작"] --> A["툴 장착·힘 영점"]
+  A --> B["①에서 찾은<br>이음매 지도 받기"]
+  B --> C["3점 찔러보기<br>벽 각도 확인"]
+  C --> D["경로를 600mm 구간으로 나눔"]
+  D --> P["퍼티 뜨기"]
+  P --> P1{"통 깊이 찔러보기<br>퍼티 충분?"}
+  P1 -->|"부족"| PH["퍼티 보충 요청"]
+  PH --> P
+  P1 -->|"충분"| AP["덮기<br>날 눕혀서 35° 15N"]
+  AP --> AP2{"마찰 급증?<br>날이 맨 벽 긁음"}
+  AP2 -->|"예 = 퍼티 소진"| P
+  AP2 -->|"아니오"| FE["펴기 3줄<br>가운데·왼쪽·오른쪽<br>날 세워서 55° 30N"]
+  FE --> N{"남은 구간?"}
+  N -->|"있음"| P
+  N -->|"없음"| V["검사<br>가로로 살살 쓸어 두께 측정"]
+  V --> V2{"가장자리 턱<br>1mm 초과?"}
+  V2 -->|"있음"| V3["그 부분 펴기 추가"]
+  V3 --> V
+  V2 -->|"없음"| E["완료<br>건조 타이머 2시간"]
+  </pre></div>
+  <h3>쉽게 말하면</h3>
+  <ol>
+    <li>통에 날을 찔러 넣어 퍼티 높이를 재고, 퍼티를 떠냅니다. 바닥 가까우면 보충을 요청합니다.</li>
+    <li>날을 <b>눕혀서</b> 살살 지나가면 퍼티가 두껍게 덮입니다.</li>
+    <li>날이 갑자기 뻑뻑해지면(마찰↑) 퍼티가 떨어진 것 → 다시 떠옵니다.</li>
+    <li>날을 <b>세워서</b> 세게 3줄 긁으면, 가장자리가 얇아져 단차가 사라집니다.</li>
+  </ol>
+  <div class="tip">날 각도가 두께를 결정하므로, 날 각도 방향은 단단하게(흔들리지 않게), 나머지 방향은 부드럽게 설정합니다.</div>
+</section>
+
+<!-- 기능 3 -->
+<section id="f3">
+  <h2><span class="no">3</span>퍼티 샌딩 (빼빠)</h2>
+  <p class="lead">마른 퍼티의 볼록한 곳만 찾아서 평평하게 갈아냅니다.</p>
+  <span class="tag">궤도 샌더 #120~180</span><span class="tag">20N</span><span class="tag">최대 3회 반복</span>
+  <h3>흐름도</h3>
+  <div class="flow"><pre class="mermaid">
+flowchart TD
+  S["시작"] --> Z{"퍼티 건조 완료?"}
+  Z -->|"아니오"| ZX["작업 거부"]
+  Z -->|"예"| A["샌더 장착·힘 영점"]
+  A --> B["퍼티 바깥 원래 벽 찔러보기<br>= 기준 평면"]
+  B --> C["샌더 끈 채로 살살 쓸어<br>높이 지도 만들기"]
+  C --> D{"볼록한 곳<br>0.5mm 초과?"}
+  D -->|"없음"| E["완료 보고"]
+  D -->|"있음"| F["볼록한 곳만 경로 생성"]
+  F --> G["벽에 닿기 → 샌더 ON"]
+  G --> H["경로 따라 갈기"]
+  H --> H2{"한 곳에 0.5초<br>이상 멈춤?"}
+  H2 -->|"예"| H3["샌더 즉시 OFF<br>패임 방지"]
+  H2 -->|"아니오"| I["샌더 OFF → 떼기"]
+  H3 --> I
+  I --> J["높이 지도 다시 측정"]
+  J --> K{"사포 수명?<br>2m² 또는 마찰 40% 감소"}
+  K -->|"다 됨"| KH["사포 교체 요청"]
+  KH --> D
+  K -->|"괜찮음"| L{"3회 넘음?"}
+  L -->|"아니오"| D
+  L -->|"예"| E
+  E --> O["오목한 곳 1mm 초과는<br>퍼티 보수 필요로 보고"]
+  </pre></div>
+  <h3>쉽게 말하면</h3>
+  <ol>
+    <li>퍼티 안 바른 벽을 찔러서 "원래 벽 높이"를 기준으로 삼습니다.</li>
+    <li>샌더를 끈 채 쓸어보며 <b>어디가 튀어나왔는지 지도</b>를 만듭니다.</li>
+    <li>튀어나온 곳만 갈고, 다시 재보고, 평평해질 때까지(최대 3번) 반복합니다.</li>
+    <li>들어간 곳은 갈아서 해결 못 하니 "퍼티 다시 필요"라고 앱에 알려줍니다.</li>
+  </ol>
+  <div class="warn">샌더는 반드시 <b>닿은 뒤 켜고, 끈 뒤 뗍니다.</b> 공중에서 돌던 패드가 닿으면 자국이 남습니다.</div>
+  <div class="tip">샌더 진동 때문에 힘 신호를 부드럽게 걸러서 쓰지만, 걸러내면 반응이 늦어집니다. 그래서 <b>60N 과부하·충돌은 거르지 않은 원래 신호</b>로 따로 감시합니다.</div>
+</section>
+
+<!-- 기능 4 -->
+<section id="f4">
+  <h2><span class="no">4</span>미장 — 전체 퍼티 올리기</h2>
+  <p class="lead">벽 전체에 얇은 퍼티층을 고르게 바릅니다. 구역을 나눠서 위→아래, 왼쪽→오른쪽으로 진행합니다.</p>
+  <span class="tag">넓은 헤라 300mm</span><span class="tag">1차 가로 30°</span><span class="tag">2차 세로 60°</span>
+  <h3>흐름도</h3>
+  <div class="flow"><pre class="mermaid">
+flowchart TD
+  S["시작"] --> A["앱에 벽 크기·로봇 위치 입력"]
+  A --> B["600×600mm 구역으로 나눔<br>위에서 아래 순서"]
+  B --> C["구역 4모서리+중앙<br>5점 찔러보기"]
+  C --> C2{"울퉁불퉁<br>5mm 초과?"}
+  C2 -->|"예"| CW["경고 → 사람 확인"]
+  CW --> D
+  C2 -->|"아니오"| D["벽 끝 쪽 모서리 더듬기<br>코너·천장 위치 확정"]
+  D --> D2{"구멍 발견?<br>창·콘센트"}
+  D2 -->|"예"| D3["구멍 주변 30mm<br>빼고 경로 생성"]
+  D2 -->|"아니오"| F
+  D3 --> F["1차 바르기<br>가로 방향"]
+  F --> F2{"바른 면적이<br>1회분 넘음?"}
+  F2 -->|"예"| FP["퍼티 다시 뜨기"]
+  FP --> F
+  F2 -->|"아니오"| G["2차 마감<br>세로 방향으로 긁어 펴기"]
+  G --> H["검사<br>두께 0.5~1.5mm, 줄 단차 0.5mm 이하"]
+  H --> H2{"통과?"}
+  H2 -->|"아니오"| G
+  H2 -->|"예"| I{"남은 구역?"}
+  I -->|"이 자리에서 닿음"| C
+  I -->|"로봇 옮겨야 함"| J["로봇 이동 요청<br>오른쪽 550mm"]
+  J --> C
+  I -->|"없음"| E["완료<br>건조 타이머"]
+  </pre></div>
+  <h3>쉽게 말하면</h3>
+  <ol>
+    <li>벽 크기를 알려주면 로봇이 작업 구역(바둑판)을 나눕니다.</li>
+    <li>구역마다 5군데를 찔러서 벽 위치를 맞추고, 끝부분은 손으로 더듬어 모서리를 찾습니다.</li>
+    <li>가로로 한 번 바르고, 세로로 한 번 긁어서 줄무늬를 없앱니다.</li>
+    <li>한 자리에서 닿는 데까지 다 하면 사람에게 로봇 이동을 요청합니다.</li>
+  </ol>
+</section>
+
+<!-- 기능 5 -->
+<section id="f5">
+  <h2><span class="no">5</span>금속 샌딩</h2>
+  <p class="lead">철판·배관·H빔의 녹과 도막을 갈아내서 프라이머가 잘 붙게 합니다.</p>
+  <span class="tag">궤도 샌더 #60~80</span><span class="tag">30N</span><span class="tag">최대 4회</span>
+  <h3>흐름도</h3>
+  <div class="flow"><pre class="mermaid">
+flowchart TD
+  S["시작"] --> A["샌더 장착·힘 영점"]
+  A --> B{"형상 선택"}
+  B -->|"철판"| B1["9점 찔러 평면 계산"]
+  B -->|"배관"| B2["두 단면 × 5점 찔러<br>원 계산 → 축·반지름"]
+  B -->|"H빔"| B3["플랜지 평면 + 양끝 더듬어<br>폭 확정"]
+  B2 --> R{"반지름<br>60mm 미만?"}
+  R -->|"예"| RX["툴 불가 경고"]
+  R -->|"아니오"| C
+  B1 --> C
+  B3 --> C["샌더 끈 채 쓸어보기<br>처음 마찰·떨림 측정"]
+  C --> D["갈기<br>곡면은 비틀림 보고 자세 계속 맞춤"]
+  D --> D2["용접 비드 위는<br>속도·힘 낮춤"]
+  D2 --> F["샌더 끈 채 다시 쓸어<br>마찰 측정"]
+  F --> G{"구역별 마찰<br>25% 이상 감소?"}
+  G -->|"예"| G1["그 구역 완료"]
+  G -->|"아니오"| G2{"4회 넘음?"}
+  G2 -->|"아니오"| D
+  G2 -->|"예"| G3["미완료 구역 보고"]
+  G1 --> H{"전 구역 완료?"}
+  H -->|"아니오"| D
+  H -->|"예"| E["완료<br>4시간 안에 프라이머 권장"]
+  G3 --> E
+  </pre></div>
+  <h3>쉽게 말하면</h3>
+  <ol>
+    <li>모양(평판·배관·빔)에 맞게 여러 점을 찔러서 표면 모양을 계산합니다.</li>
+    <li>녹이 있는 면은 <b>거칠어서 마찰이 크고 떨림이 많습니다.</b> 처음 값을 재 둡니다.</li>
+    <li>갈고 나서 다시 쓸어보고, 마찰이 충분히 줄면 "녹 제거 완료"로 봅니다.</li>
+    <li>금속은 단단해서 부딪히면 충격이 크므로 다가가는 속도를 더 느리게(10mm/s) 합니다.</li>
+  </ol>
+</section>
+
+<!-- 기능 6 -->
+<section id="f6">
+  <h2><span class="no">6</span>금속 프라이머 바르기</h2>
+  <p class="lead">샌딩한 금속면에 방청 프라이머를 2회 고르게 바릅니다.</p>
+  <span class="tag">롤러 100mm</span><span class="tag">8N 가볍게</span><span class="tag">3번 칠하고 1번 담그기</span>
+  <h3>흐름도</h3>
+  <div class="flow"><pre class="mermaid">
+flowchart TD
+  S["시작"] --> Z{"금속 샌딩 완료?"}
+  Z -->|"아니오"| ZW["경고<br>사람이 확인해야 진행"]
+  ZW --> A
+  Z -->|"예"| A["롤러 장착·힘 영점"]
+  A --> B["⑤의 표면 모양 재사용<br>3점 찔러 위치 재확인"]
+  B --> C["1회차: 가로 방향 / 2회차: 세로 방향"]
+  C --> D["트레이에 담그기<br>바닥 찔러 깊이 확인 → 경사면에서 2번 굴림"]
+  D --> F["가볍게 굴리기 3줄"]
+  F --> F2{"롤러가 끌림?<br>마찰 급증 = 말랐음"}
+  F2 -->|"예"| D
+  F2 -->|"아니오"| G{"남은 줄?"}
+  G -->|"있음"| D
+  G -->|"없음"| H["모서리·볼트 주변 붓질<br>선택"]
+  H --> I{"2회차까지 끝?"}
+  I -->|"아니오"| W["덧칠 대기 타이머"]
+  W --> C
+  I -->|"예"| J["육안 확인 + 습도막 게이지 3곳 측정<br>앱에 기록"]
+  J --> E["완료"]
+  </pre></div>
+  <h3>쉽게 말하면</h3>
+  <ol>
+    <li>페인트는 액체라 힘이 안 느껴지므로 <b>트레이 바닥을 찔러서</b> 위치를 잡고 담급니다.</li>
+    <li>세게 누르면 줄무늬가 생기므로 8N으로 가볍게 굴립니다.</li>
+    <li>롤러가 뻑뻑하게 끌리면 페인트가 마른 것 → 바로 다시 담급니다.</li>
+    <li>1회차 가로, 2회차 세로로 칠해 빠진 곳을 메우고, 마지막은 사람이 눈으로 확인하고 습도막 게이지로 두께를 재서 앱에 기록합니다.</li>
+  </ol>
+</section>
+
+<!-- 앱 통신 -->
+<section id="app">
+  <h2>앱 ↔ 로봇 소통</h2>
+  <p class="lead">앱이 명령을 보내고, 로봇은 상태와 요청을 보냅니다.</p>
+  <div class="flow"><pre class="mermaid">
+sequenceDiagram
+  participant 앱
+  participant 관리PC as 작업관리 PC
+  participant 로봇 as M0609
+  앱->>관리PC: START_TASK (작업, 파라미터)
+  관리PC->>로봇: 이동·힘제어 명령
+  로봇-->>관리PC: 힘·위치 값
+  관리PC-->>앱: STATE (진행률) / FORCE (힘 그래프)
+  관리PC-->>앱: WAIT_HUMAN (퍼티 보충해 주세요)
+  앱->>관리PC: HUMAN_DONE
+  관리PC-->>앱: DONE (보고서·높이 지도)
+  </pre></div>
+  <h3>앱 → 로봇 명령</h3>
+  <table>
+    <tr><th>명령</th><th>뜻</th></tr>
+    <tr><td><code>START_TASK</code></td><td>작업 시작. MESH_ATTACH / PUTTY_SEAM / SAND_PUTTY / PUTTY_FULL / SAND_METAL / PRIMER_METAL</td></tr>
+    <tr><td><code>PAUSE</code> · <code>RESUME</code></td><td>지금 줄 끝에서 멈춤 / 다시 시작</td></tr>
+    <tr><td><code>ABORT</code></td><td>즉시 멈추고 안전하게 뒤로 빠짐</td></tr>
+    <tr><td><code>TEACH_START</code> · <code>TEACH_SAVE</code></td><td>팔 끌기 모드 / 현재 위치 저장</td></tr>
+    <tr><td><code>HUMAN_DONE</code></td><td>사람이 요청 처리 완료</td></tr>
+    <tr><td><code>SET_PARAM</code></td><td>실행 중 힘·속도 조정 (다음 줄부터 반영)</td></tr>
+    <tr><td><code>GET_MAP</code></td><td>높이·마찰·진행 지도 요청</td></tr>
+  </table>
+  <h3>로봇 → 앱 알림</h3>
+  <table>
+    <tr><th>알림</th><th>뜻</th></tr>
+    <tr><td><code>STATE</code></td><td>현재 단계·구역·진행률 (1초마다)</td></tr>
+    <tr><td><code>FORCE</code></td><td>실시간 힘 값 (0.1초마다)</td></tr>
+    <tr><td><code>WAIT_HUMAN</code></td><td>퍼티 보충 / 로봇 이동 / 사포 교체 / 테이프 확인 / 육안 확인</td></tr>
+    <tr><td><code>WARN</code> · <code>ERROR</code></td><td>경고(벽 울퉁불퉁, 구멍 발견 등) / 정지 오류</td></tr>
+    <tr><td><code>DONE</code></td><td>완료 보고서</td></tr>
+  </table>
+  <h3>작업 순서 잠금</h3>
+  <div class="flow"><pre class="mermaid">
+flowchart LR
+  subgraph 미장
+  M1["① 메시"] --> M2["② 메시 퍼티"] --> W1(["건조"]) --> M3["③ 샌딩"] --> M4["④ 전체 퍼티"] --> W2(["건조"]) --> M5["③ 샌딩"]
+  end
+  subgraph 금속
+  K1["⑤ 금속 샌딩"] --> W3(["4시간 이내"]) --> K2["⑥ 프라이머 1회"] --> W4(["덧칠 대기"]) --> K3["⑥ 프라이머 2회"]
+  end
+  </pre></div>
+  <div class="tip"><b>작업 큐:</b> 한 영역이 건조·덧칠 대기 중이면, 앱이 순서 잠금을 만족하는 다른 영역 작업을 제안합니다(로봇 이동은 사람 확인). 대기 시간은 ROI 비교에 쓰도록 기록합니다.</div>
+</section>
+
+<!-- 안전 -->
+<section id="safe">
+  <h2>안전 규칙</h2>
+  <table>
+    <tr><th>항목</th><th>규칙</th></tr>
+    <tr><td>속도</td><td>최대 250mm/s, 벽에 닿은 상태는 100mm/s 이하</td></tr>
+    <tr><td>힘</td><td>어떤 작업도 60N 초과 금지 → 넘으면 즉시 떼기</td></tr>
+    <tr><td>작업 공간</td><td>벽에서 150mm 넘게 사람 쪽으로 나오지 않음</td></tr>
+    <tr><td>샌더</td><td>닿은 뒤 켜기, 끈 뒤 떼기, 0.5초 멈추면 자동 OFF</td></tr>
+    <tr><td>비상정지</td><td>비상 버튼 + 앱 ABORT. 재시작 시 벽 위치부터 다시 확인</td></tr>
+    <tr><td>통신 끊김</td><td>앱 응답 2초 없으면 지금 줄 끝에서 일시정지</td></tr>
+    <tr><td>대차 밀림</td><td>구역 시작·끝에 기준점 재측정, 2mm 넘으면 정지</td></tr>
+    <tr><td>툴 확인</td><td>툴 교체 후 무게 측정, 등록값 ±0.2kg 밖이면 정지</td></tr>
+    <tr><td>위험성 평가</td><td>현장 투입 전 ISO/TS 15066 기반 평가, 샌딩 중 구역 분리</td></tr>
+    <tr><td>센서 이상</td><td>힘 영점이 3번 연속 흔들리면 오류 정지</td></tr>
+  </table>
+  <div class="warn"><b>구현 전 확인:</b> ① ROS2 서비스 이름은 ROS2 매뉴얼에서 재확인 ② 힘·속도·각도 값은 초기값이므로 현장 시편으로 보정 ③ 관절 토크센서 정밀도는 <a href="#poc">PoC 검증</a>으로 먼저 확인, 미달 시 손목 힘센서 추가.<br>세부 의사코드와 API 대응표는 <code>M0609_공사작업_구현로직.md</code>를 참고하세요.</div>
+</section>
+
+<!-- PoC -->
+<section id="poc">
+  <h2>PoC 기술 검증 (0단계, 2주)</h2>
+  <p class="lead">이 프로젝트의 전제 <b>"관절 토크센서만으로 0.5mm 단차와 5N 접촉을 구별할 수 있다"</b>를 실제 M0609로 먼저 확인합니다.</p>
+  <table>
+    <tr><th>#</th><th>시험</th><th>방법</th><th>통과 기준</th></tr>
+    <tr><td>1</td><td>힘 노이즈 (정지)</td><td>안 닿은 채 60초 힘 기록</td><td>흔들림 1.0N 이하</td></tr>
+    <tr><td>2</td><td>힘 노이즈 (이동)</td><td>안 닿은 채 100mm/s 이동</td><td>최대 3N 이하</td></tr>
+    <tr><td>3</td><td>힘 유지</td><td>5/10/25N로 평판 300mm 쓸기</td><td>오차 20% 이하, 끊김 0회</td></tr>
+    <tr><td>4</td><td>단차·틈 감지</td><td>0.3/0.5/1.0mm 단차, 2/3/5mm 틈 시편 각 20회</td><td>0.5mm 이상 95% 감지, 오탐 5% 이하</td></tr>
+    <tr><td>5</td><td>테이퍼 이음매</td><td>테이퍼 석고보드 2장 맞댄 시편 20회</td><td>95% 감지</td></tr>
+    <tr><td>6</td><td>높이 지도 반복성</td><td>같은 곳 5회 측정</td><td>편차 0.2mm 이하</td></tr>
+    <tr><td>7</td><td>샌더 켠 상태 힘 신호</td><td>샌더 ON, 20N 유지</td><td>필터 후 흔들림 2N 이하</td></tr>
+    <tr><td>8</td><td>대차 밀림</td><td>60N 누르기 전후 기준점 재측정</td><td>0.5mm 이하</td></tr>
+  </table>
+  <h3>판정 흐름</h3>
+  <div class="flow"><pre class="mermaid">
+flowchart TD
+  A["PoC 8개 시험"] --> B{"전부 통과?"}
+  B -->|"예"| OK["1단계 진행"]
+  B -->|"아니오"| C{"어느 시험?"}
+  C -->|"1·3·4 힘·감지"| D["손목 힘센서 추가 후 재시험"]
+  D --> E{"4·5 감지 통과?"}
+  E -->|"예"| OK
+  E -->|"아니오"| F["자동 탐색 제외<br>메시는 방법 2만"]
+  F --> OK
+  C -->|"6 반복성"| G["평탄도 목표 완화<br>또는 힘센서 추가"]
+  C -->|"7 샌더 진동"| H["방진 마운트 추가 후 재시험"]
+  C -->|"8 대차 밀림"| I["고정 방식 변경"]
+  G --> A
+  H --> A
+  I --> A
+  </pre></div>
+</section>
+
+<!-- 하드웨어 -->
+<section id="hw">
+  <h2>하드웨어 계획</h2>
+  <h3>대차 고정</h3>
+  <ul>
+    <li>이동 대차 + <b>바닥 아웃트리거 4점</b> → 벽을 60N로 눌러도 안 밀리게.</li>
+    <li>높이: 받침대 2단(0 / +900mm) 또는 리프트 대차.</li>
+    <li><b>밀림 감시:</b> 구역 시작·끝에 기준점 1곳을 찔러보고 2mm 넘게 다르면 정지 → 위치 다시 잡고 그 구역 재검사.</li>
+  </ul>
+  <h3>툴 교체</h3>
+  <ul>
+    <li>1차는 사람이 교체 (앱이 "툴 교체: 샌더" 요청).</li>
+    <li><b>촉각으로 툴 확인:</b> 교체 후 공중에서 무게를 재서 등록값 ±0.2kg 밖이면 "툴 불일치" 정지 → 카메라 없이 잘못 끼운 툴을 막습니다.</li>
+    <li><b>그리퍼로 잡는 메시 롤러 툴:</b> 손잡이에 V홈·핀을 둬서 항상 같은 위치로 잡힘. 작업 중 비틀림이 갑자기 변하면 미끄러진 것 → 정지. 반복되면 플랜지 직결로 변경.</li>
+    <li>커터 구동(그리퍼로 누르는 기계식 vs 배선): PoC 후 기구 설계에서 결정.</li>
+  </ul>
+  <h3>분진·도료 보호</h3>
+  <ul>
+    <li>로봇 분진 커버, 그리퍼 커버.</li>
+    <li>샌더 집진 호스 + 샌더 켜면 집진기도 자동 ON.</li>
+  </ul>
+</section>
+
+<!-- 리스크 -->
+<section id="risk">
+  <h2>리스크와 플랜 B</h2>
+  <table>
+    <tr><th>리스크</th><th>미리 아는 법</th><th>플랜 B</th></tr>
+    <tr><td>토크센서 정밀도 부족</td><td>PoC 1·3·4</td><td>손목 힘센서 추가 (예비비)</td></tr>
+    <tr><td>테이퍼 이음매 못 찾음</td><td>PoC 5</td><td>방법 2(손 지정)로 운용</td></tr>
+    <tr><td>대차 밀림</td><td>구역마다 기준점 재측정</td><td>고정 강화, 구역 축소</td></tr>
+    <tr><td>퍼티 점도·온도 차이</td><td>바른 뒤 두께 검사</td><td>퍼티 제품 고정, 시편으로 각도·힘 표 작성</td></tr>
+    <tr><td>샌더 진동이 힘 신호 오염</td><td>PoC 7</td><td>과부하는 필터 없는 원신호로 따로 감시, 방진 마운트</td></tr>
+    <tr><td>분진이 관절에 들어감</td><td>정기 점검</td><td>보호 커버, 집진</td></tr>
+    <tr><td>그리퍼 툴 미끄러짐</td><td>비틀림 급변</td><td>플랜지 직결</td></tr>
+    <tr><td>도막 두께 측정 불가</td><td>—</td><td>사람이 습도막 게이지로 3곳 측정 → 앱 기록</td></tr>
+    <tr><td>안전 인증</td><td>위험성 평가</td><td>투입 전 ISO/TS 15066 평가, 샌딩 중 구역 분리</td></tr>
+    <tr><td>건조 대기로 로봇이 놂</td><td>앱 대기 시간 기록</td><td>작업 큐로 다른 영역 작업</td></tr>
+    <tr><td>자동 탐색 시간 대비 효익 낮음</td><td>시간 측정</td><td>방법 2 우선, 방법 1은 기록이 필요할 때만</td></tr>
+  </table>
+</section>
+</main>
+<script>mermaid.initialize({startOnLoad:true,theme:'neutral',flowchart:{curve:'basis',useMaxWidth:true}});</script>
+</body>
+</html>
