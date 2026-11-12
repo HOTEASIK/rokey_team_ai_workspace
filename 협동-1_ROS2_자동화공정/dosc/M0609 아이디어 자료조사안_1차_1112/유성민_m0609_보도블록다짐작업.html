@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>M0609 기반 보도블록 타격 안착 보조 로봇</title>
+<style>
+:root{font:16px/1.7 system-ui,sans-serif;color:#203235;background:#f2f5f3;scroll-behavior:smooth}*{box-sizing:border-box}body{margin:0}header{background:#123d39;color:white;padding:60px 24px 48px}header div,main{max-width:920px;margin:auto}h1{font-size:clamp(2rem,5vw,3.4rem);line-height:1.18;margin:10px 0 18px;letter-spacing:-.045em}header p{max-width:68ch;color:#d6e9e4;margin:0}header small{color:#a9d8cb}main{padding:22px 18px 48px}nav{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 20px}a{color:#145a51}nav a{background:white;border:1px solid #ceddd7;padding:4px 11px;border-radius:20px;text-decoration:none}section{background:#fff;border:1px solid #dbe6e0;border-radius:14px;margin:14px 0;padding:clamp(17px,4vw,32px)}h2{margin:0 0 12px;line-height:1.3;letter-spacing:-.035em}h3{margin:22px 0 8px}p{margin:8px 0}ul,ol{padding-left:1.35em}li+li{margin-top:6px}table{width:100%;border-collapse:collapse;margin:12px 0}th,td{text-align:left;vertical-align:top;padding:9px 12px;border-bottom:1px solid #dbe6e0}th{background:#e7f1ec}td:first-child{width:24%;font-weight:650}.note{background:#e7f1ec;border-left:4px solid #287367;padding:12px 16px;margin-top:16px}.steps{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;list-style:none;padding:0}.steps li{border:1px solid #c6ddd4;padding:9px;border-radius:8px;margin:0}.steps strong{display:block;color:#186459}footer{font-size:.9rem;color:#48605c;padding:0 4px}a:focus-visible{outline:3px solid #247d6e;outline-offset:3px}@media(max-width:620px){.steps{grid-template-columns:repeat(2,1fr)}th,td{padding:7px}}@media print{body,header,section{background:#fff;color:#111}header{padding:0 0 18px}header p,header small{color:#333}nav{display:none}section{border:0;padding:0;margin:18px 0}h2,h3{break-after:avoid}tr{break-inside:avoid}main{padding:0}}
+</style></head><body>
+<header><div><small>ROS 2 로봇 자동화 공정 · 팀 검토용</small><h1>M0609 기반 보도블록<br>타격 안착 보조 로봇</h1><p>M0609가 고정된 베이스 판을 작업대로 겸용한다. 줄눈 양쪽의 높이를 측정하고, 높게 놓인 블록을 한 번씩 타격한 뒤 다시 측정해 목표 단차에 도달하면 종료한다.</p></div></header>
+<main>
+<nav aria-label="목차"><a href="#users">대상 사용자</a><a href="#idea">아이디어</a><a href="#compare">기존 방식</a><a href="#scope">구현 범위</a><a href="#flow">공정과 구성</a><a href="#verify">검증 계획</a></nav>
+<section id="users"><h2>1. 대상 사용자와 현재 작업 방식</h2>
+<p><strong>대상 사용자</strong>는 보행로와 광장에서 보도블록을 시공하거나 보수하는 작업자다.</p>
+<p>작업자는 받침층을 정리하고 블록을 배치한다. 시공 중 고무망치 등으로 줄눈 폭과 배열을 조정하고, 배치 후에는 진동 플레이트 콤팩터로 다진다. 개별 블록의 높이 확인·타격·재확인을 자동화 후보로 삼는다. <a href="https://www.cmha.org/wp-content/uploads/2024/03/PAV-GSP-017-21-CA.pdf">배치 시 정렬 지침</a> · <a href="https://www.cmha.org/wp-content/uploads/2024/03/PAV-GSP-005-21-CA.pdf">다짐 시공 지침</a></p>
+<p class="note">현장 관찰은 아직 진행하지 않았다. 개별 단차 보정의 빈도와 소요 시간, 콤팩터 다짐 후 보정 효과가 유지되는지는 별도로 확인한다.</p></section>
+<section id="idea"><h2>2. 아이디어 개요와 선정 이유</h2>
+<p><strong>측정 → 1회 타격 → 재측정</strong>을 반복해 작업자의 확인과 판단 부담을 줄일 수 있는지 검증한다.</p><p>카메라 없이도 지그와 교시 좌표로 시작할 수 있고, 결과를 mm 단위로 비교할 수 있다. 스포츠 테이핑의 박리·공급 장치나 실리콘 도포의 토출 제어와 달리, 첫 실험에서는 작업자가 한 번씩 두드려 타격 전후 높이 변화부터 확인할 수 있다.</p></section>
+<section id="compare"><h2>3. 기존 방식·유사 사례와 차별점</h2><table><thead><tr><th scope="col">비교 대상</th><th scope="col">제안 공정과의 관계</th></tr></thead><tbody>
+<tr><td>고무망치·직선자</td><td>작업자가 현장에서 바로 조정할 수 있다. 제안 공정은 타격마다 단차와 횟수를 기록하고, 재측정 결과에 따라 종료한다.</td></tr>
+<tr><td>플레이트 콤팩터</td><td>포장 구간을 다진다. 제안 공정은 다짐 전 개별 블록의 국부 단차를 보정하는 단계에 적용한다.</td></tr>
+<tr><td>자동 바닥 타일 시공 장비</td><td>준비된 바닥에 타일을 배치하고 배열을 맞추는 인접 사례다. 이 프로젝트는 배치된 블록의 높이 보정에 초점을 둔다. <a href="https://www.dmx-robotics.com/solutions/floor-robotics/tile-laying">DMX 사례</a></td></tr>
+</tbody></table></section>
+<section id="scope"><h2>4. 사용자 요구사항과 구현 범위</h2><ul>
+<li><strong>사용자 조작</strong> — 블록을 올리고 HMI에서 시작한다. 초기·현재·최종 단차, 타격 횟수와 종료 사유를 확인한다.</li>
+<li><strong>시연 범위</strong> — 수평 작업대에서 기준 블록과 대상 블록 각 1장, 줄눈 양쪽 측정점 각 1곳, 대상 타격점 1곳을 사용한다.</li>
+<li><strong>필수 기능</strong> — 높이 측정, 단차 계산, 타격 후 재측정, 허용 범위 도달 또는 오류 시 종료. 측정점을 늘려 기울기를 판정하는 기능은 후속 범위다.</li>
+<li><strong>구현 조건</strong> — 카메라 없이 지그와 교시 좌표를 사용한다. 제어 판단은 ROS 2에서 처리하는 구성이다. 블록의 치수·무게와 허용 단차는 샘플 확보 및 반복 측정 뒤 확정한다.</li>
+</ul></section>
+<section id="flow"><h2>5. 공정 흐름과 시스템 구성</h2>
+<h3>베이스 판을 겸용한 작업대</h3><p>로봇 전면의 기존 베이스 판 위에 모래 트레이와 위치 지그를 고정한다. 기준 블록은 높이가 유지되도록 고정한다. 대상 블록은 옆으로 밀리지 않으면서 아래로 내려갈 수 있도록 모래층 위에 둔다. 정지 상태에서 작업자 쪽 가장자리로 블록을 투입·배출한다.</p>
+<p>프로브의 접근·후퇴 경로와 타격부 간섭 여부를 확인한다. 자동 타격 장치는 별도 프레임으로 지지하는 안을 검토하고, 블록을 통해 베이스 판에 전달되는 진동이 측정이나 로봇 동작에 영향을 주는지 시험한다. <a href="https://manual.doosanrobotics.com/en/user-manual/3.2.1/1-m-h-series/securing-the-robot">두산 설치 매뉴얼</a></p>
+<h3>정상 작업 순서</h3><ol class="steps"><li><strong>1. 투입</strong>블록을 지그에 배치</li><li><strong>2. 측정</strong>줄눈 양쪽 높이 기록</li><li><strong>3. 판정</strong>대상 높이에서 기준 높이를 뺌</li><li><strong>4. 타격·재측정</strong>대상이 높으면 한 번 타격한 뒤 2단계 반복</li></ol>
+<p>허용 범위 안이면 완료한다. 대상이 너무 낮거나, 측정에 실패하거나, 변화가 거의 없거나, 최대 타격 횟수에 도달하면 중단 사유를 표시한다.</p>
+<table><thead><tr><th scope="col">구성</th><th scope="col">역할</th></tr></thead><tbody>
+<tr><td>M0609</td><td><code>movej</code>로 측정점 위와 대기 위치 사이를 이동하고 <code>movel</code>로 수직 접근·후퇴한다. <a href="https://doosanrobotics.github.io/doosan-robotics-ros-manual/jazzy/services/motion_services.html">모션 서비스</a></td></tr>
+<tr><td>RG2·프로브</td><td>RG2로 프로브를 잡는 구성을 검토한다. 접촉 스위치 작동 시점의 TCP 높이를 기록한다. 별도 스위치가 없으면 툴 외력으로 접촉을 감지하는 방식의 반복성을 시험한다. <a href="https://doosanrobotics.github.io/doosan-robotics-ros-manual/jazzy/services/force_services.html">힘 제어 서비스</a></td></tr>
+<tr><td>타격 장치</td><td>로봇 후퇴를 확인한 뒤 한 번 타격하고 복귀 신호를 보낸다. 복귀를 확인한 뒤 로봇이 재접근한다.</td></tr>
+<tr><td>ROS 2·HMI</td><td>ROS 2가 단차와 재타격 여부를 판단한다. HMI는 작업자 입력과 결과 표시를 맡는다.</td></tr></tbody></table>
+<p>작업자 접근과 가동을 분리하고 실습실 보호장치와 물리적 비상정지를 사용한다. <a href="https://www.osha.gov/otm/section-4-safety-hazards/chapter-4">로봇 작업 안전 자료</a></p>
+</section>
+<section id="verify"><h2>6. 예상 가치와 검증 계획</h2><p>2026년 마포구·동대문구·은평구의 연간단가 발주 사례는 보도 유지보수 수요의 근거다. 단차 보정 자동화의 효과는 실험으로 확인한다. <a href="https://www.g2b.go.kr/pn/pnp/pnpe/UntyAtchFile/downloadFile.do?bidPbancNo=R26BK01344233&amp;bidPbancOrd=000&amp;fileSeq=2&amp;fileType=&amp;prcmBsneSeCd=07">마포구 공고</a> · <a href="https://www.g2b.go.kr/pn/pnp/pnpe/UntyAtchFile/downloadFile.do?bidPbancNo=R26BK01358015&amp;bidPbancOrd=000&amp;fileSeq=7&amp;fileType=&amp;prcmBsneSeCd=07">동대문구 공고</a> · <a href="https://www.g2b.go.kr/pn/pnp/pnpe/UntyAtchFile/downloadFile.do?bidPbancNo=R26BK01356069&amp;bidPbancOrd=000&amp;fileSeq=2&amp;fileType=&amp;prcmBsneSeCd=07">은평구 공고</a></p>
+<ul><li>두께를 아는 심과 별도 높이 게이지로 로봇 측정값의 오차와 반복 편차를 확인한다.</li><li>같은 초기 단차와 비슷한 받침층 조건에서 수작업과 제안 공정의 최종 단차, 타격 횟수, 전체 작업 시간과 작업자 개입 시간을 비교한다.</li><li>목표에 도달하는 정상 사례와, 대상이 낮거나 측정이 실패하거나 타격 후 변화가 없는 예외를 시연한다.</li></ul>
+<p class="note"><strong>첫 시연은 반자동으로 진행한다.</strong> 자동 타격 장치 확보 전에는 로봇이 후퇴하고 작업자 접근이 가능한 정지 상태에서 사람이 한 번 두드린다. 작업자가 작업 구역을 벗어난 뒤 재측정한다. 한 번의 타격으로 생긴 높이 변화가 공유 베이스 판에서의 측정 편차와 구분되는지 먼저 확인한다.</p>
+</section><footer>팀 검토용 기획안 · 작업물 사양, 타격 장치, 허용 단차는 실험 후 확정</footer></main></body></html>
