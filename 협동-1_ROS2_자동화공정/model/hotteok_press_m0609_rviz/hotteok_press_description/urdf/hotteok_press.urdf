@@ -1,0 +1,15 @@
+<?xml version="1.0"?>
+<robot name="hotteok_press_m0609">
+  <!-- Z=0 is flat putty-contact surface; Z=0.095 is handle top. SI units. -->
+  <material name="warm_white"><color rgba="0.86 0.86 0.80 1"/></material>
+  <link name="hotteok_press_link">
+    <visual><geometry><mesh filename="package://hotteok_press_description/meshes/hotteok_press.stl" scale="1 1 1"/></geometry><material name="warm_white"/></visual>
+    <collision><geometry><mesh filename="package://hotteok_press_description/meshes/hotteok_press.stl" scale="1 1 1"/></geometry></collision>
+    <!-- Placeholder only: replace measured mass/inertia before simulation or control. -->
+    <inertial><origin xyz="0 0 0.025"/><mass value="0.20"/><inertia ixx="0.00015" ixy="0" ixz="0" iyy="0.00015" iyz="0" izz="0.00020"/></inertial>
+  </link>
+  <link name="putty_contact_tcp"/>
+  <joint name="contact_fixed" type="fixed"><parent link="hotteok_press_link"/><child link="putty_contact_tcp"/><origin xyz="0 0 0" rpy="0 0 0"/></joint>
+  <link name="handle_grasp_frame"/>
+  <joint name="grasp_fixed" type="fixed"><parent link="hotteok_press_link"/><child link="handle_grasp_frame"/><origin xyz="0 0 0.065" rpy="0 0 0"/></joint>
+</robot>
