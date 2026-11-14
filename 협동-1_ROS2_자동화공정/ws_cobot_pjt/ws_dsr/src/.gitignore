@@ -1,0 +1,4 @@
+# 두산 공식 패키지(약 400MB)는 저장소에 올리지 않음 - README 참고
+doosan-robot2/
+__pycache__/
+*.pyc
