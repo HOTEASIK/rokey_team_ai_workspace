@@ -16,7 +16,18 @@
 
 [실행]
   source ~/ws_cobot_pjt/ws_dsr/install/setup.bash
-  ros2 run rokey1 sun_gear
+  ros2 run rokey1 sun_gear                                    # 실제 로봇
+  ros2 run rokey1 sun_gear --ros-args -p simulation:=true     # 시뮬레이션 (mode:=virtual)
+
+[시뮬레이션 모드] (simulation:=true)
+  가상 로봇(bringup mode:=virtual)에는 힘 센서와 실제 부품이 없어서
+  힘 제어/힘 검사를 하면 측정값이 항상 0N 이 되어 실패한다. 그래서
+    - 힘 제어(누르기) 대신 같은 시간만큼 대기만 한다 (그리퍼 열기→닫기 순서는 유지)
+    - 집기 힘 검사(check_force_condition)를 건너뛴다
+    - Tool / TCP 설정이 실패해도 경고만 하고 계속 진행한다
+      (가상 컨트롤러에 'Tool Weight', 'GripperDA_v1' 이 등록돼 있지 않을 수 있음.
+       이 경우 4번 작업의 movel 좌표는 플랜지 기준이 되어 실제와 위치가 조금 다르다)
+    - 속도를 SIM_SPEED_RATIO 배로 바꿀 수 있다
 """
 import rclpy
 import DR_init
@@ -54,6 +65,10 @@ PICK_FORCE_RATIO = (0.7, 1.2)  # 집을 때 정상으로 보는 Z축 힘 범위 
                                # 예) -50N → 35~60N, -70N → 49~84N (원본 DART 는 고정 10~15)
                                # -50N 실측 45.6N 기준. LOG_TOOL_FORCE 로그를 보고 조정할 것
 REPEAT_COUNT = 1               # 전체 사이클 반복 횟수
+
+# 시뮬레이션 모드 기본값. 실행할 때 --ros-args -p simulation:=true/false 로 덮어쓸 수 있다.
+SIMULATION = False
+SIM_SPEED_RATIO = 1.0          # 시뮬레이션일 때 속도/가속도 배율 (예: 0.5 → 절반 속도)
 
 # =============================================================================
 # 좌표 / 파라미터
@@ -109,6 +124,16 @@ def main(args=None):
         node = rclpy.create_node('m0609_pick_3', namespace=ROBOT_ID)
         DR_init.__dsr__node = node
 
+        # 시뮬레이션 여부 (ROS 파라미터 > 코드 기본값)
+        sim = node.declare_parameter('simulation', SIMULATION).value
+        speed = SIM_SPEED_RATIO if sim else 1.0
+        force_enabled = ENABLE_FORCE and not sim
+        check_enabled = CHECK_PICK_FORCE and not sim
+        node.get_logger().info(
+            f'Mode: {"SIMULATION" if sim else "REAL"} '
+            f'(force={force_enabled}, pick check={check_enabled}, speed x{speed})'
+        )
+
         # 반드시 __dsr__node 를 설정한 '뒤에' import 할 것
         import DSR_ROBOT2 as robot
         from DSR_ROBOT2 import posj, posx
@@ -150,7 +175,7 @@ def main(args=None):
                 robot._ros2_movel,
                 robot._ros2_set_digital_output,
             ]
-            if ENABLE_FORCE:
+            if force_enabled:
                 clients += [
                     robot._ros2_set_ref_coord,
                     robot._ros2_task_compliance_ctrl,
@@ -171,7 +196,7 @@ def main(args=None):
         # ---------------------------------------------------------------------
         def move_joint(p):
             """관절 이동. 속도 60 deg/s, 가속도 100 deg/s^2."""
-            command('movej', robot.movej, posj(*p), vel=60.0, acc=100.0)
+            command('movej', robot.movej, posj(*p), vel=60.0 * speed, acc=100.0 * speed)
 
         def move_linear(p):
             """직선 이동 (BASE 기준 절대 좌표).
@@ -179,8 +204,8 @@ def main(args=None):
             vel = [병진 속도 mm/s, 회전 속도 deg/s]
             acc = [병진 가속도 mm/s^2, 회전 가속도 deg/s^2]
             """
-            command('movel', robot.movel, posx(*p), vel=[250.0, 80.625],
-                    acc=[1000.0, 322.5], ref=robot.DR_BASE,
+            command('movel', robot.movel, posx(*p), vel=[250.0 * speed, 80.625 * speed],
+                    acc=[1000.0 * speed, 322.5 * speed], ref=robot.DR_BASE,
                     mod=robot.DR_MV_MOD_ABS)
 
         # ---------------------------------------------------------------------
@@ -225,8 +250,17 @@ def main(args=None):
             target_n 이 음수이면 아래(-Z) 방향으로 누른다.
             """
             nonlocal force_active, compliance_active
-            if DRY_RUN or not ENABLE_FORCE:
-                log(f'Force stage {target_n}N SKIPPED (ENABLE_FORCE=False)')
+            if DRY_RUN:
+                log(f'[DRY RUN] force stage {target_n}N for {hold_sec}s')
+                return
+            if not force_enabled:
+                # 시뮬레이션 / 힘 제어 꺼짐: 누르지 않고 순서와 시간만 재현한다
+                log(f'Force stage {target_n}N SKIPPED ({"simulation" if sim else "ENABLE_FORCE=False"}), '
+                    f'waiting {hold_sec}s instead')
+                if grip_while_pressing:
+                    gripper_open()
+                    gripper_close()
+                command('wait', robot.wait, hold_sec)
                 return
             # 원본 DART 코드는 기준 좌표계를 따로 정하지 않았으므로 기본값인 BASE 를 사용.
             # 누르는 방향이 BASE -Z 인지 TOOL -Z 인지 실제 로봇에서 확인할 것.
@@ -254,7 +288,7 @@ def main(args=None):
                 if LOG_TOOL_FORCE:
                     # PICK_FORCE_RATIO 를 정하기 위한 실측값 출력
                     log(f'Tool force @ {target_n}N stage: {robot.get_tool_force(robot.DR_TOOL)}')
-                if check and CHECK_PICK_FORCE:
+                if check and check_enabled:
                     # 목표 힘 크기에 비례해서 범위를 정한다 (누르는 힘을 바꿔도 따라감)
                     fmin = round(abs(target_n) * PICK_FORCE_RATIO[0], 1)
                     fmax = round(abs(target_n) * PICK_FORCE_RATIO[1], 1)
@@ -334,16 +368,23 @@ def main(args=None):
             #   - Tool : 공구 무게 → 힘/토크 센서 보정에 사용
             #   - TCP  : 공구 끝점 → movel(posx) 좌표의 기준점
             command('set_robot_mode MANUAL', robot.set_robot_mode, robot.ROBOT_MODE_MANUAL)
-            command('set_tool', robot.set_tool, TOOL_NAME)
-            command('set_tcp', robot.set_tcp, TCP_NAME)
+            for name, fn, value in (('set_tool', robot.set_tool, TOOL_NAME),
+                                    ('set_tcp', robot.set_tcp, TCP_NAME)):
+                try:
+                    command(name, fn, value)
+                except RuntimeError as exc:
+                    if not sim:
+                        raise
+                    # 가상 컨트롤러에는 Tool/TCP 가 등록돼 있지 않을 수 있음
+                    node.get_logger().warn(f'{exc} ({value!r}) - ignored in simulation')
             command('set_robot_mode AUTONOMOUS', robot.set_robot_mode, robot.ROBOT_MODE_AUTONOMOUS)
             # 특이점 근처에서는 자동으로 회피하도록 설정
             robot.set_singularity_handling(robot.DR_AVOID)
-            # 전역 기본 속도/가속도 (원본 DART 값)
-            robot.set_velj(60.0)               # 관절 속도 [deg/s]
-            robot.set_accj(100.0)              # 관절 가속도 [deg/s^2]
-            robot.set_velx(250.0, 80.625)      # 직선 속도 [mm/s, deg/s]
-            robot.set_accx(1000.0, 322.5)      # 직선 가속도 [mm/s^2, deg/s^2]
+            # 전역 기본 속도/가속도 (원본 DART 값, 시뮬레이션이면 SIM_SPEED_RATIO 적용)
+            robot.set_velj(60.0 * speed)                       # 관절 속도 [deg/s]
+            robot.set_accj(100.0 * speed)                      # 관절 가속도 [deg/s^2]
+            robot.set_velx(250.0 * speed, 80.625 * speed)      # 직선 속도 [mm/s, deg/s]
+            robot.set_accx(1000.0 * speed, 322.5 * speed)      # 직선 가속도 [mm/s^2, deg/s^2]
 
         # ---------------------------------------------------------------------
         # 메인 루프: 홈 → 1~3번(관절) → 4번(직교) → 홈

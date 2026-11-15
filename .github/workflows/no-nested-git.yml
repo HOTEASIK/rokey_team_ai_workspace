@@ -1,0 +1,23 @@
+# 훅을 설치하지 않은 팀원이 올린 PR도 잡기 위한 검사.
+# 저장소 안에 서브모듈 링크(파일 대신 커밋 번호만 저장된 폴더)가 있으면 실패합니다.
+name: no-nested-git
+
+on:
+  pull_request:
+  push:
+    branches: [main, develop]
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: 서브모듈 링크 검사
+        run: |
+          bad=$(git -c core.quotepath=off ls-files -s | awk '$1 == "160000" { $1=$2=$3=""; sub(/^ +/, ""); print }')
+          if [ -n "$bad" ]; then
+            echo "::error::아래 폴더가 파일 대신 링크(서브모듈)로 올라갔습니다. 폴더 안의 .git 을 옮기고 다시 커밋하세요 (docs/git-workflow.md 참고)."
+            echo "$bad"
+            exit 1
+          fi
+          echo "OK: 서브모듈 링크 없음"
