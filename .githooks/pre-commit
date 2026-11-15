@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+# 팀 저장소 안에 다른 git 저장소(.git 폴더가 든 폴더)가 들어가는 것을 막는 훅.
+# 그런 폴더는 파일 대신 커밋 번호만 저장되는 "서브모듈 링크"가 되어 GitHub에서 404가 남.
+# 설치: bash tools/setup_hooks.sh  (한 번만)
+
+bad=$(git -c core.quotepath=off diff --cached --raw --no-renames \
+  | awk -F'\t' '{ split($1, m, " "); if (m[2] == "160000") print $2 }')
+
+if [ -n "$bad" ]; then
+  echo ""
+  echo "✋ 커밋 중단: 아래 폴더 안에 .git 이 있어서 파일 대신 링크만 올라갑니다."
+  echo ""
+  echo "$bad" | sed 's/^/   - /'
+  echo ""
+  echo "고치는 법 (폴더마다):"
+  echo "$bad" | while read -r p; do
+    echo "   git rm --cached -f \"$p\""
+    echo "   mkdir -p ~/git_backups && mv \"$p/.git\" ~/git_backups/\$(basename \"$p\")_git_\$(date +%Y%m%d%H%M%S)"
+    echo "   git add \"$p\""
+    echo ""
+  done
+  echo "그다음 다시 git commit 하세요. (자세한 설명: docs/git-workflow.md)"
+  exit 1
+fi
+
+exit 0
