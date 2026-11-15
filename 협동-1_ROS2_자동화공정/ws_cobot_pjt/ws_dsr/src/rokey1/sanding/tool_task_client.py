@@ -4,8 +4,8 @@
 지금은 아래 기본값 또는 ROS 파라미터로 테스트합니다.
 
 사용법:
-  ros2 run sanding tool_task_client
-  ros2 run sanding tool_task_client --ros-args -p tool_id:=1 \
+  ros2 run rokey1 tool_task_client
+  ros2 run rokey1 tool_task_client --ros-args -p tool_id:=1 \
       -p start_posx:="[400.0, 0.0, 200.0, 90.0, 180.0, 0.0]" \
       -p end_posx:="[500.0, 0.0, 200.0, 90.0, 180.0, 0.0]" \
       -p return_tool:=true

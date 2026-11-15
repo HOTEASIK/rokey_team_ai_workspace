@@ -26,8 +26,8 @@
 
 사용법:
   (터미널 1) sod && sodreal
-  (터미널 2) sod && ros2 run sanding tool_task_server
-  (터미널 3) sod && ros2 run sanding tool_task_client   # 테스트용 클라이언트
+  (터미널 2) sod && ros2 run rokey1 tool_task_server
+  (터미널 3) sod && ros2 run rokey1 tool_task_client   # 테스트용 클라이언트
 """
 import math
 import threading
