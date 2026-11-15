@@ -26,8 +26,6 @@ setup(
         'console_scripts': [
             'move = rokey1.move:main',
             'grip_test = rokey1.grip_test:main',
-            'tool_task_server = sanding.tool_task_action_server:main',
-            'tool_task_client = sanding.tool_task_client:main',
         ],
     },
 )
