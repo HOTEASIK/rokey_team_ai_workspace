@@ -110,6 +110,8 @@ def run_robot(args):
         GetCurrentPosj, GetCurrentPosx, GetCurrentTcp, MoveLine, SetCtrlBoxDigitalOutput,
     )
 
+    from utils.shutdown import safe_shutdown
+
     # 스크립트 옵션은 argparse에서 이미 처리했다.
     rclpy.init(args=[])
     node = None
@@ -187,10 +189,7 @@ def run_robot(args):
                transfer_speed=args.transfer_speed, pick_speed=args.pick_speed)
         print('집기 및 상승 명령 완료. 헤라가 실제로 잡혔는지는 확인이 필요합니다.')
     finally:
-        if node is not None:
-            node.destroy_node()
-        if rclpy.ok():
-            rclpy.shutdown()
+        safe_shutdown(node)
 
 
 if __name__ == '__main__':

@@ -38,6 +38,8 @@ def main(args=None):
     import rclpy
     from rclpy.node import Node
 
+    from utils.shutdown import safe_shutdown
+
     rclpy.init(args=args)
     node = Node('initialize_device', namespace=ROBOT_ID)
     try:
@@ -49,9 +51,7 @@ def main(args=None):
         node.get_logger().error(f'초기화 실패: {exc}')
         return 1
     finally:
-        node.destroy_node()
-        if rclpy.ok():
-            rclpy.shutdown()
+        safe_shutdown(node)
 
 
 # ===== 함수 정의 =====
@@ -162,7 +162,7 @@ def initialize(node):
 
     from dsr_msgs2.srv import GetCurrentPosj, MoveJoint
 
-    from .service_waiter import ServiceWaiter
+    from utils.service_waiter import ServiceWaiter
 
     import DR_init
 

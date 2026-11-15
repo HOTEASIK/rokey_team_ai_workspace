@@ -1,6 +1,9 @@
 import rclpy
 import DR_init
 
+from utils.service_waiter import ServiceWaiter
+from utils.shutdown import safe_shutdown
+
 ROBOT_ID = "dsr01"
 ROBOT_MODEL = "m0609"
 VELOCITY, ACC = 30, 30
@@ -33,12 +36,12 @@ def main(args=None):
     # 서비스 디스커버리가 끝나기 전에 요청을 보내면 응답이 오지 않아 무한 대기하므로
     # 사용할 서비스가 준비될 때까지 기다린다
     import DSR_ROBOT2
-    for cli in (DSR_ROBOT2._ros2_set_current_tool,
-                DSR_ROBOT2._ros2_set_current_tcp,
-                DSR_ROBOT2._ros2_movej,
-                DSR_ROBOT2._ros2_movel):
-        while not cli.wait_for_service(timeout_sec=1.0): # 서비스 준비 될때 까지 기다리기
-            node.get_logger().info(f"Waiting for service {cli.srv_name} ...")
+    ServiceWaiter(node).wait(
+        DSR_ROBOT2._ros2_set_current_tool,
+        DSR_ROBOT2._ros2_set_current_tcp,
+        DSR_ROBOT2._ros2_movej,
+        DSR_ROBOT2._ros2_movel,
+    )
 
     # 설정 권장 : 도구,무게
     set_tool("Tool Weight_1")
@@ -73,9 +76,8 @@ def main(args=None):
         node.get_logger().info(f"Robot Error: {e}")
 
     finally:
-        movej(homej, vel=VELOCITY, acc=ACC)
-        node.destroy_node()
-        rclpy.shutdown()      
+        safe_shutdown(node, ("Failed to move home",
+                             lambda: movej(homej, vel=VELOCITY, acc=ACC)))
 
 
 if __name__ == "__main__":

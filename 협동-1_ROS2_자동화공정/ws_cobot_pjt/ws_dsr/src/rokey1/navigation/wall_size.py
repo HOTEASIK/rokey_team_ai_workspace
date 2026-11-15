@@ -87,6 +87,9 @@ import numpy as np
 import rclpy
 import DR_init
 
+from utils.service_waiter import ServiceWaiter
+from utils.shutdown import safe_shutdown
+
 try:
     from navigation.wall_navigation import RobotIO
     from navigation.wall_size_rviz import WallSizeViz
@@ -153,9 +156,9 @@ TIP_RADIUS = 0.0            # 공구 끝 반지름 [mm] (끝점 보정: 구형 �
 # =============================================================================
 # 속도 / 힘 / 판정
 # =============================================================================
-MOVE_VEL, MOVE_ACC = 100.0, 200.0
-PROBE_VEL, PROBE_ACC = 10.0, 50.0       # 벽/바닥 찾을 때 전진 속도
-FOLLOW_VEL, FOLLOW_ACC = 20.0, 50.0     # 벽 따라갈 때 속도
+MOVE_VELOCITY, MOVE_ACC = 100.0, 200.0
+PROBE_VELOCITY, PROBE_ACC = 10.0, 50.0       # 벽/바닥 찾을 때 전진 속도
+FOLLOW_VELOCITY, FOLLOW_ACC = 20.0, 50.0     # 벽 따라갈 때 속도
 
 CONTACT_FORCE = 5.0         # 벽/바닥 '막힘' 판정 힘 [N]
 FREE_FORCE = 2.0            # 따라가는 중 이 힘보다 작으면 '비어있음'
@@ -260,7 +263,7 @@ class SizeIO(RobotIO):
     def _posx(self, xyz):
         return self.dsr.posx(*[float(v) for v in xyz[:3]], *TOOL_ORI)
 
-    def move_l(self, xyz, vel=MOVE_VEL, acc=MOVE_ACC, expect=()):
+    def move_l(self, xyz, vel=MOVE_VELOCITY, acc=MOVE_ACC, expect=()):
         """감시하면서 직선 이동 (끝날 때까지 기다림).
         expect: 이동 중 정상적으로 생길 수 있는 접촉 힘 방향 (예: 벽에서 떨어지는 중 → (APP_DIR,)).
                 비워두면 '어떤 접촉도 없어야 하는 이동' → 작은 힘에도 충돌로 처리."""
@@ -283,7 +286,7 @@ class SizeIO(RobotIO):
         if self.on_move is not None:
             self.on_move(xyz)
 
-    def move_l_unguarded(self, xyz, vel=MOVE_VEL, acc=MOVE_ACC):
+    def move_l_unguarded(self, xyz, vel=MOVE_VELOCITY, acc=MOVE_ACC):
         """감시 없는 직선 이동 (가드가 회복 동작에 사용)."""
         super().move_l(xyz, vel, acc)
         if self.on_move is not None:
@@ -292,18 +295,17 @@ class SizeIO(RobotIO):
     def wait_for_services(self):
         super().wait_for_services()
         d = self.dsr
-        for cli in (d._ros2_set_digital_output, d._ros2_set_singularity_handling,
-                    d._ros2_ikin, d._ros2_get_current_solution_space):
-            while not cli.wait_for_service(timeout_sec=1.0):
-                self.log(f'서비스 대기 중: {cli.srv_name}')
+        ServiceWaiter(self.node).wait(d._ros2_set_digital_output, d._ros2_set_singularity_handling,
+                                      d._ros2_ikin, d._ros2_get_current_solution_space)
 
     def set_singularity(self, var_vel):
         """특이점 처리: True → DR_VAR_VEL (경로 유지, 감속), False → DR_AVOID (기본)."""
         d = self.dsr
         mode = d.DR_VAR_VEL if var_vel else d.DR_AVOID
         ret = d.set_singularity_handling(mode)
-        self.log(f'[특이점 처리] {"DR_VAR_VEL (경로 유지)" if var_vel else "DR_AVOID (기본)"}'
-                 f'{"" if ret == 0 else " - 설정 실패!"}')
+        self.node.get_logger().info(
+            f'[특이점 처리] {"DR_VAR_VEL (경로 유지)" if var_vel else "DR_AVOID (기본)"}'
+            f'{"" if ret == 0 else " - 설정 실패!"}')
         return ret == 0
 
     def joint_at(self, xyz, sol_space):
@@ -315,7 +317,7 @@ class SizeIO(RobotIO):
 
     def gripper_close(self):
         """그리퍼를 닫아 손가락 끝을 탐침으로 쓴다."""
-        self.log('[그리퍼] 닫기 → 손가락 끝으로 탐색')
+        self.node.get_logger().info('[그리퍼] 닫기 → 손가락 끝으로 탐색')
         self.dsr.set_digital_output(*GRIP_DO_OPEN)    # 반대쪽 신호 먼저 끄기
         self.dsr.set_digital_output(*GRIP_DO_CLOSE)
         time.sleep(GRIP_WAIT_SEC)
@@ -351,9 +353,6 @@ class WallSizeMeasurer:
         self.floor_z = None
         self.results = {}
         io.on_move = lambda xyz: self.trace(xyz, 'move', publish=True)
-
-    def log(self, msg):
-        self.io.log(msg)
 
     def sense(self, pos, expected, context):
         """힘 읽기 + 사고 검사 (가드가 있으면 가드가 읽고 검사, 문제면 예외)."""
@@ -410,7 +409,7 @@ class WallSizeMeasurer:
             self.io.node.get_logger().warn(f'RViz 퍼블리시 실패: {e}')
 
     # ------------------------------------------------------------ 가드 이동
-    def guarded_move(self, start, direction, dist, axis, vel=PROBE_VEL):
+    def guarded_move(self, start, direction, dist, axis, vel=PROBE_VELOCITY):
         """start 에서 direction 으로 dist 만큼 천천히 가다가 axis 축 힘이
         CONTACT_FORCE 이상이면 정지. Returns: 접촉 위치 또는 None."""
         start = np.asarray(start, float)
@@ -432,7 +431,7 @@ class WallSizeMeasurer:
             time.sleep(SAMPLE_PERIOD)
         else:
             self.io.stop()
-            self.log('  -> 가드 이동 시간 초과')
+            self.io.node.get_logger().info('  -> 가드 이동 시간 초과')
         self.io.wait_motion_done()
         return contact
 
@@ -441,19 +440,19 @@ class WallSizeMeasurer:
         """벽 앞에서 아래로 내려가 바닥 높이를 잰다 ('바닥부터 시작')."""
         if not FLOOR_DETECT:
             self.floor_z = FLOOR_Z_DEFAULT
-            self.log(f'[바닥] 측정 생략 → 설정값 {self.floor_z:.1f} 사용')
+            self.io.node.get_logger().info(f'[바닥] 측정 생략 → 설정값 {self.floor_z:.1f} 사용')
             return self.floor_z
         start = make_point(LAT_CENTER_GUESS, self.face_a - APPROACH_GAP, FLOOR_SEARCH_START_Z)
-        self.log('[바닥] 아래로 내려가며 바닥 찾기')
+        self.io.node.get_logger().info('[바닥] 아래로 내려가며 바닥 찾기')
         c = self.guarded_move(start, -UP_DIR, FLOOR_SEARCH_DEPTH, UP_AXIS)
-        self.io.move_l(start, vel=PROBE_VEL * 3, expect=(UP_DIR,))      # 바닥에서 떨어지기
+        self.io.move_l(start, vel=PROBE_VELOCITY * 3, expect=(UP_DIR,))      # 바닥에서 떨어지기
         if c is None:
-            self.log(f'  -> 바닥 못 찾음 → 설정값 {FLOOR_Z_DEFAULT:.1f} 사용')
+            self.io.node.get_logger().info(f'  -> 바닥 못 찾음 → 설정값 {FLOOR_Z_DEFAULT:.1f} 사용')
             self.floor_z = FLOOR_Z_DEFAULT
         else:
             self.floor_z = float(c[UP_AXIS])
             self.add_point('floor', c, CONTACT_FORCE)
-            self.log(f'  -> 바닥 Z = {self.floor_z:.2f}')
+            self.io.node.get_logger().info(f'  -> 바닥 Z = {self.floor_z:.2f}')
         return self.floor_z
 
     # ------------------------------------------------------------ 알고리즘 1
@@ -461,7 +460,7 @@ class WallSizeMeasurer:
         """(lat, up) 에서 벽 쪽으로 전진 → 막히는 곳 = 벽의 시작점."""
         start = make_point(lat, self.face_a - APPROACH_GAP, up)
         c = self.guarded_move(start, APP_DIR, APPROACH_GAP + SEARCH_DEPTH, APPROACH_AXIS)
-        self.io.move_l(start, vel=PROBE_VEL * 3, expect=(APP_DIR,))     # 벽에서 후퇴
+        self.io.move_l(start, vel=PROBE_VELOCITY * 3, expect=(APP_DIR,))     # 벽에서 후퇴
         if c is None:
             return None
         self.face_a = app_of(c)                           # 다음 탐색은 측정한 표면 기준
@@ -487,14 +486,14 @@ class WallSizeMeasurer:
             return contact, 'limit'
 
         self.io.move_l(contact - APP_DIR * APPROACH_GAP)
-        self.io.move_l(contact - APP_DIR * PRE_GAP, vel=PROBE_VEL * 2)
+        self.io.move_l(contact - APP_DIR * PRE_GAP, vel=PROBE_VELOCITY * 2)
         self.io.zero_force()
 
         last_contact, reason = contact.copy(), 'no_contact'
         try:
             self.io.start_compliance()
             # 벽에 붙이기
-            self.io.amove_l(press_pt, PROBE_VEL, PROBE_ACC)
+            self.io.amove_l(press_pt, PROBE_VELOCITY, PROBE_ACC)
             self.io.wait_motion_done()
             t0 = time.time()
             pressed = True
@@ -507,13 +506,13 @@ class WallSizeMeasurer:
                 last_contact, reason = self._follow_loop(contact, press_pt, direction, dist, ax, kind)
             else:
                 # 탐색 전체를 멈추지 않고 이 방향만 '무효' 처리하고 계속
-                self.log('  -> 벽에 다시 붙지 못함 → 이 방향은 무효 처리')
+                self.io.node.get_logger().info('  -> 벽에 다시 붙지 못함 → 이 방향은 무효 처리')
         finally:
             self.io.release_press()
             # 가드가 발동했으면 여기서 움직이지 않는다 (회복은 run_line 이 가드로 처리)
             if self.io.guard is None or self.io.guard.tripped is None:
                 pos = self.io.get_pos()
-                self.io.move_l(pos - APP_DIR * (APPROACH_GAP + press), vel=PROBE_VEL * 3,
+                self.io.move_l(pos - APP_DIR * (APPROACH_GAP + press), vel=PROBE_VELOCITY * 3,
                                expect=(APP_DIR, direction))
         self.update_rviz(force=True)
         return last_contact, reason
@@ -521,7 +520,7 @@ class WallSizeMeasurer:
     def _follow_loop(self, contact, press_pt, direction, dist, ax, kind):
         """벽에 붙은 상태에서 따라가며 감시. Returns: (마지막 접촉 위치, 종료 이유)."""
         last_contact, reason = contact.copy(), 'timeout'
-        self.io.amove_l(press_pt + direction * dist, FOLLOW_VEL, FOLLOW_ACC)
+        self.io.amove_l(press_pt + direction * dist, FOLLOW_VELOCITY, FOLLOW_ACC)
         t0 = time.time()
         t_free = t_block = None
         best_s, t_prog = 0.0, t0
@@ -572,10 +571,10 @@ class WallSizeMeasurer:
     # ------------------------------------------------------------ 알고리즘 3
     def measure_height_line(self, lat):
         """lat 위치에서 바닥 → 위로 따라가 벽 높이 측정."""
-        self.log(f'[높이 측정] x={lat:.1f}')
+        self.io.node.get_logger().info(f'[높이 측정] x={lat:.1f}')
         c = self.seek_wall(lat, self.floor_z + FLOOR_CLEARANCE)
         if c is None:
-            self.log('  -> 벽 없음')
+            self.io.node.get_logger().info('  -> 벽 없음')
             return None
         top, reason = self.follow_wall(c, UP_DIR, 'scan_v')
         h = float(top[UP_AXIS]) + TIP_RADIUS - self.floor_z
@@ -584,18 +583,19 @@ class WallSizeMeasurer:
             bottom = top.copy()
             bottom[UP_AXIS] = self.floor_z
             self.add_line('height', bottom, top, h)
-            self.log(f'  -> 높이 {h:.1f} mm (끝 z={top[UP_AXIS]:.1f}, 종료={reason})')
+            self.io.node.get_logger().info(
+                f'  -> 높이 {h:.1f} mm (끝 z={top[UP_AXIS]:.1f}, 종료={reason})')
         else:
-            self.log(f'  -> [무효] 종료={reason} → 결과에서 제외 (측정값 {h:.1f} mm)')
+            self.io.node.get_logger().info(f'  -> [무효] 종료={reason} → 결과에서 제외 (측정값 {h:.1f} mm)')
         return {'lat': float(lat), 'start': c.tolist(), 'end': top.tolist(),
                 'height': h, 'reason': reason, 'valid': valid}
 
     def measure_width_line(self, up, center):
         """up 높이에서 벽을 찾은 뒤 +옆 / -옆으로 따라가 너비 측정."""
-        self.log(f'[너비 측정] z={up:.1f} (시작 x={center:.1f})')
+        self.io.node.get_logger().info(f'[너비 측정] z={up:.1f} (시작 x={center:.1f})')
         c = self.seek_wall(center, up)
         if c is None:
-            self.log('  -> 벽 없음')
+            self.io.node.get_logger().info('  -> 벽 없음')
             return None
         right, r1 = self.follow_wall(c, LAT_DIR, 'scan_h')
         left, r2 = self.follow_wall(c, -LAT_DIR, 'scan_h')
@@ -605,9 +605,11 @@ class WallSizeMeasurer:
             p0, p1 = c.copy(), c.copy()
             p0[LAT_AXIS], p1[LAT_AXIS] = left[LAT_AXIS], right[LAT_AXIS]
             self.add_line('width', p0, p1, w)
-            self.log(f'  -> 너비 {w:.1f} mm (x {left[LAT_AXIS]:.1f} ~ {right[LAT_AXIS]:.1f}, 종료={r2}/{r1})')
+            self.io.node.get_logger().info(
+                f'  -> 너비 {w:.1f} mm (x {left[LAT_AXIS]:.1f} ~ {right[LAT_AXIS]:.1f}, '
+                f'종료={r2}/{r1})')
         else:
-            self.log(f'  -> [무효] 종료={r2}/{r1} → 결과에서 제외 (측정값 {w:.1f} mm)')
+            self.io.node.get_logger().info(f'  -> [무효] 종료={r2}/{r1} → 결과에서 제외 (측정값 {w:.1f} mm)')
         return {'up': float(up), 'start': c.tolist(), 'left': float(left[LAT_AXIS]),
                 'right': float(right[LAT_AXIS]), 'width': w, 'reason': [r2, r1], 'valid': valid}
 
@@ -626,8 +628,8 @@ class WallSizeMeasurer:
             return r
         except ToolCollision as e:
             ev = e.event
-            self.log(f'  -> [툴 충돌] {ev.message} → 후퇴 후 이 선은 건너뜀 '
-                     f'(연속 {guard.tool_streak}/{MAX_TOOL_COLLISIONS})')
+            self.io.node.get_logger().info(f'  -> [툴 충돌] {ev.message} → 후퇴 후 이 선은 건너뜀 '
+                                           f'(연속 {guard.tool_streak}/{MAX_TOOL_COLLISIONS})')
             if ev.pos:
                 self.add_point('collision', ev.pos, ev.value)
             self.skipped.append({'line': fn.__name__, 'args': [float(a) for a in args],
@@ -637,18 +639,19 @@ class WallSizeMeasurer:
             if not ok:
                 raise
             if not guard.wait_clear():             # 물러났는데도 계속 눌림 → 원인이 남아있음
-                self.log('[툴 충돌] 후퇴 후에도 힘이 남아있음 → 전체 중단')
+                self.io.node.get_logger().info('[툴 충돌] 후퇴 후에도 힘이 남아있음 → 전체 중단')
                 raise
             guard.reset()
             if guard.tool_streak >= MAX_TOOL_COLLISIONS:
-                self.log(f'[툴 충돌] 연속 {guard.tool_streak}번 → 원인이 남아있는 것 같아 전체 중단')
+                self.io.node.get_logger().info(
+                    f'[툴 충돌] 연속 {guard.tool_streak}번 → 원인이 남아있는 것 같아 전체 중단')
                 raise
             return 'skip'
 
     # ------------------------------------------------------------ 알고리즘 4, 5
     def sweep_widths(self):
         """z 를 STEP 씩 올리면서 옆(x) 방향 너비 측정 → 총 높이/너비."""
-        self.log(f'=== 너비 스윕: z 를 {STEP:.0f}mm 씩 올리며 x 방향 탐색 ===')
+        self.io.node.get_logger().info(f'=== 너비 스윕: z 를 {STEP:.0f}mm 씩 올리며 x 방향 탐색 ===')
         rows, center, misses = [], LAT_CENTER_GUESS, 0
         for up in np.arange(self.floor_z + FLOOR_CLEARANCE, Z_LIMIT + 1e-6, STEP):
             r = self.run_line(self.measure_width_line, float(up), center)
@@ -670,19 +673,20 @@ class WallSizeMeasurer:
             out['total_width'] = best['width']
             out['total_height'] = rows[-1]['up'] - self.floor_z   # 해상도 = STEP (벽에 닿기만 하면 됨)
             out['lat_range'] = [min(r['left'] for r in good), max(r['right'] for r in good)]
-            self.log(f'[너비 스윕 결과] 총 너비 {out["total_width"]:.1f} mm (z={best["up"]:.0f}), '
-                     f'총 높이 ≈ {out["total_height"]:.1f} mm (±{STEP:.0f}, 벽이 닿은 마지막 줄 기준), '
-                     f'무효 {out["invalid"]}/{len(rows)}줄')
+            self.io.node.get_logger().info(
+                f'[너비 스윕 결과] 총 너비 {out["total_width"]:.1f} mm (z={best["up"]:.0f}), '
+                f'총 높이 ≈ {out["total_height"]:.1f} mm (±{STEP:.0f}, 벽이 닿은 마지막 줄 기준), '
+                f'무효 {out["invalid"]}/{len(rows)}줄')
         elif rows:
-            self.log(f'[너비 스윕 결과] 벽은 찾았지만 유효한 줄이 없음 ({len(rows)}줄 모두 무효)')
+            self.io.node.get_logger().info(f'[너비 스윕 결과] 벽은 찾았지만 유효한 줄이 없음 ({len(rows)}줄 모두 무효)')
         else:
-            self.log('[너비 스윕 결과] 벽을 찾지 못함')
+            self.io.node.get_logger().info('[너비 스윕 결과] 벽을 찾지 못함')
         self.results['width_sweep'] = out
         return out
 
     def sweep_heights(self):
         """x 를 STEP 씩 옮기면서 위(z) 방향 높이 측정 → 총 높이/너비."""
-        self.log(f'=== 높이 스윕: x 를 {STEP:.0f}mm 씩 옮기며 z 방향 탐색 ===')
+        self.io.node.get_logger().info(f'=== 높이 스윕: x 를 {STEP:.0f}mm 씩 옮기며 z 방향 탐색 ===')
         cols, misses = [], 0
         for lat in np.arange(LAT_RANGE[0], LAT_RANGE[1] + 1e-6, STEP):
             r = self.run_line(self.measure_height_line, float(lat))
@@ -701,13 +705,14 @@ class WallSizeMeasurer:
             best = max(good, key=lambda r: r['height'])
             out['total_height'] = best['height']
             out['total_width'] = cols[-1]['lat'] - cols[0]['lat']      # 해상도 = STEP (벽에 닿기만 하면 됨)
-            self.log(f'[높이 스윕 결과] 총 높이 {out["total_height"]:.1f} mm (x={best["lat"]:.0f}), '
-                     f'총 너비 ≈ {out["total_width"]:.1f} mm (+최대 {2 * STEP:.0f}, 벽이 닿은 첫/끝 열 기준), '
-                     f'무효 {out["invalid"]}/{len(cols)}열')
+            self.io.node.get_logger().info(
+                f'[높이 스윕 결과] 총 높이 {out["total_height"]:.1f} mm (x={best["lat"]:.0f}), '
+                f'총 너비 ≈ {out["total_width"]:.1f} mm (+최대 {2 * STEP:.0f}, 벽이 닿은 첫/끝 열 기준), '
+                f'무효 {out["invalid"]}/{len(cols)}열')
         elif cols:
-            self.log(f'[높이 스윕 결과] 벽은 찾았지만 유효한 열이 없음 ({len(cols)}열 모두 무효)')
+            self.io.node.get_logger().info(f'[높이 스윕 결과] 벽은 찾았지만 유효한 열이 없음 ({len(cols)}열 모두 무효)')
         else:
-            self.log('[높이 스윕 결과] 벽을 찾지 못함')
+            self.io.node.get_logger().info('[높이 스윕 결과] 벽을 찾지 못함')
         self.results['height_sweep'] = out
         return out
 
@@ -716,7 +721,8 @@ class WallSizeMeasurer:
         zs: 너비를 잴 높이들 (바닥 기준 높이 [mm])
         xs: 높이를 잴 옆 위치들 (BASE [mm]). None 이면 너비 결과로 자동 결정
             (벽 가운데, 가운데 ± 너비의 30%)."""
-        self.log(f'=== 빠른 측정: 너비 {len(zs)}줄 (바닥 위 {zs}), 높이 {"자동 3" if xs is None else len(xs)}줄 ===')
+        self.io.node.get_logger().info(
+            f'=== 빠른 측정: 너비 {len(zs)}줄 (바닥 위 {zs}), 높이 {"자동 3" if xs is None else len(xs)}줄 ===')
         widths, heights, center = [], [], LAT_CENTER_GUESS
         for dz in zs:
             r = self.run_line(self.measure_width_line, self.floor_z + float(dz), center)
@@ -731,7 +737,7 @@ class WallSizeMeasurer:
                 xs = [center - half, center, center + half]
             else:
                 xs = [center]
-            self.log(f'[빠른 측정] 높이 줄 위치 자동: x = {[round(x, 1) for x in xs]}')
+            self.io.node.get_logger().info(f'[빠른 측정] 높이 줄 위치 자동: x = {[round(x, 1) for x in xs]}')
         for x in xs:
             r = self.run_line(self.measure_height_line, float(x))
             if isinstance(r, dict):
@@ -745,10 +751,12 @@ class WallSizeMeasurer:
                'width_stats': stats(good_w), 'height_stats': stats(good_h)}
         for name, st, tot in (('너비', out['width_stats'], len(widths)), ('높이', out['height_stats'], len(heights))):
             if st:
-                self.log(f'[빠른 측정] {name}: 평균 {st["mean"]:.1f} mm (최소 {st["min"]:.1f}, 최대 {st["max"]:.1f}, '
-                         f'σ {st["std"]:.2f}, 유효 {st["n"]}/{tot}줄)')
+                self.io.node.get_logger().info(
+                    f'[빠른 측정] {name}: 평균 {st["mean"]:.1f} mm '
+                    f'(최소 {st["min"]:.1f}, 최대 {st["max"]:.1f}, '
+                    f'σ {st["std"]:.2f}, 유효 {st["n"]}/{tot}줄)')
             else:
-                self.log(f'[빠른 측정] {name}: 유효한 줄 없음 ({tot}줄)')
+                self.io.node.get_logger().info(f'[빠른 측정] {name}: 유효한 줄 없음 ({tot}줄)')
         self.results['lines'] = out
         self.results['width_sweep'] = {'total_width': out['width_stats']['mean']} if good_w else {}
         self.results['height_sweep'] = {'total_height': out['height_stats']['mean']} if good_h else {}
@@ -759,7 +767,7 @@ class WallSizeMeasurer:
         try:
             sol = self.io.dsr.get_current_solution_space()
             if not isinstance(sol, int) or sol < 0:
-                self.log('[특이점 점검] 현재 solution space 를 못 읽어서 건너뜀')
+                self.io.node.get_logger().info('[특이점 점검] 현재 solution space 를 못 읽어서 건너뜀')
                 return
             lats = np.linspace(LAT_RANGE[0], LAT_RANGE[1], 5)
             ups = np.arange(self.floor_z + FLOOR_CLEARANCE, Z_LIMIT + 1e-6, 20.0)
@@ -773,31 +781,34 @@ class WallSizeMeasurer:
                         near.append((lat, up, q[4]))
             if near:
                 zs = sorted({round(u) for _, u, _ in near})
-                self.log(f'[특이점 점검] 손목 특이점 근처(|J5|<{SING_WARN_DEG:.0f}°): '
-                         f'z={zs[0]}~{zs[-1]} mm ({len(near)}곳)'
-                         + (' → DR_VAR_VEL 이라 경로는 유지, 그 구간에서 느려짐' if SINGULARITY_VAR_VEL
-                            else ' → DR_AVOID 라 경로가 휘어 측정이 틀어질 수 있음!'))
+                self.io.node.get_logger().info(f'[특이점 점검] 손목 특이점 근처(|J5|<{SING_WARN_DEG:.0f}°): '
+                                               f'z={zs[0]}~{zs[-1]} mm ({len(near)}곳)'
+                                               + (' → DR_VAR_VEL 이라 경로는 유지, 그 구간에서 느려짐' if SINGULARITY_VAR_VEL
+                                                  else ' → DR_AVOID 라 경로가 휘어 측정이 틀어질 수 있음!'))
             else:
-                self.log('[특이점 점검] 탐색 영역에 손목 특이점 없음')
+                self.io.node.get_logger().info('[특이점 점검] 탐색 영역에 손목 특이점 없음')
             if unreachable:
-                self.log(f'[특이점 점검] 도달 불가/역기구학 실패 {len(unreachable)}곳 '
-                         f'(예: x={unreachable[0][0]:.0f}, z={unreachable[0][1]:.0f}) → 영역 확인')
+                self.io.node.get_logger().info(f'[특이점 점검] 도달 불가/역기구학 실패 {len(unreachable)}곳 '
+                                               f'(예: x={unreachable[0][0]:.0f}, z={unreachable[0][1]:.0f}) → 영역 확인')
         except Exception as e:
-            self.log(f'[특이점 점검] 실패해서 건너뜀: {e}')
+            self.io.node.get_logger().info(f'[특이점 점검] 실패해서 건너뜀: {e}')
 
     def summary(self):
         w = self.results.get('width_sweep', {})
         h = self.results.get('height_sweep', {})
         height = h.get('total_height', w.get('total_height'))
         width = w.get('total_width', h.get('total_width'))
-        self.log('=================== 최종 결과 ===================')
-        self.log(f'  바닥 Z    : {self.floor_z:.1f} mm')
-        self.log(f'  총 높이   : {height:.1f} mm' if height is not None else '  총 높이   : -')
-        self.log(f'  총 너비   : {width:.1f} mm' if width is not None else '  총 너비   : -')
+        self.io.node.get_logger().info('=================== 최종 결과 ===================')
+        self.io.node.get_logger().info(f'  바닥 Z    : {self.floor_z:.1f} mm')
+        self.io.node.get_logger().info(
+            f'  총 높이   : {height:.1f} mm' if height is not None else '  총 높이   : -')
+        self.io.node.get_logger().info(
+            f'  총 너비   : {width:.1f} mm' if width is not None else '  총 너비   : -')
         if self.io.mode == 'virtual':
             b = VIRTUAL_BOX
-            self.log(f'  (정답: 높이 {b["top"] - b["floor"]:.1f}, 너비 {b["lat"][1] - b["lat"][0]:.1f})')
-        self.log('=================================================')
+            self.io.node.get_logger().info(
+                f'  (정답: 높이 {b["top"] - b["floor"]:.1f}, 너비 {b["lat"][1] - b["lat"][0]:.1f})')
+        self.io.node.get_logger().info('=================================================')
         self.results['total_height'] = height
         self.results['total_width'] = width
         self.update_rviz(force=True)
@@ -822,7 +833,7 @@ class WallSizeMeasurer:
         }
         with open(path, 'w') as f:
             json.dump(data, f, indent=2, ensure_ascii=False)
-        self.log(f'결과 저장: {path}')
+        self.io.node.get_logger().info(f'결과 저장: {path}')
         return path
 
 
@@ -840,14 +851,15 @@ def go_home_after_stop(io, guard, policy):
             ans = input('[확인] 사고로 멈췄습니다. 주변이 안전하고 정지가 해제됐으면 y (홈 복귀), '
                         '그 외 입력은 그대로 둡니다: ')
             if ans.strip().lower() != 'y':
-                io.log('홈 복귀 안 함 (현재 위치 유지)')
+                io.node.get_logger().info('홈 복귀 안 함 (현재 위치 유지)')
                 return
         else:
-            io.log('[virtual] 사고 후지만 테스트이므로 홈 복귀 진행')
+            io.node.get_logger().info('[virtual] 사고 후지만 테스트이므로 홈 복귀 진행')
         try:
             state = io.dsr.get_robot_state()
             if state in BAD_STATES:
-                io.log(f'로봇이 아직 정지 상태(state={state}) → 홈 복귀 불가. 펜던트에서 해제 후 직접 이동하세요')
+                io.node.get_logger().info(
+                    f'로봇이 아직 정지 상태(state={state}) → 홈 복귀 불가. 펜던트에서 해제 후 직접 이동하세요')
                 return
         except Exception:
             pass
@@ -856,9 +868,9 @@ def go_home_after_stop(io, guard, policy):
         io.move_l(pos - APP_DIR * APPROACH_GAP, expect=(APP_DIR,))   # 벽에서 떨어진 뒤
         io.move_j(HOME_J)
     except ForceGuardError as e:
-        io.log(f'홈 복귀 중 다시 사고 감지 → 정지: {e}')
+        io.node.get_logger().info(f'홈 복귀 중 다시 사고 감지 → 정지: {e}')
     except Exception as e:
-        io.log(f'홈 복귀 실패: {e}')
+        io.node.get_logger().info(f'홈 복귀 실패: {e}')
 
 
 # =============================================================================
@@ -907,7 +919,11 @@ def main(args=None):
         rclpy.shutdown()
         return
 
-    import DSR_ROBOT2 as dsr
+    try:
+        import DSR_ROBOT2 as dsr
+    except ImportError as e:
+        node.get_logger().info(f'Error importing DSR_ROBOT2 : {e}')
+        return
 
     io = SizeIO(node, dsr, mode)
     try:
@@ -919,7 +935,8 @@ def main(args=None):
     guard = ForceGuard(io, injector)
     viz = WallSizeViz(node, topic='wall_size_markers', frame_id=frame_id) if use_rviz else None
     if viz is not None:
-        io.log(f'RViz 마커: {node.resolve_topic_name("wall_size_markers")} (Fixed Frame: {frame_id})')
+        node.get_logger().info(
+            f'RViz 마커: {node.resolve_topic_name("wall_size_markers")} (Fixed Frame: {frame_id})')
     m = WallSizeMeasurer(io, viz)
     if viz is not None:
         viz.start_background(m.scene)
@@ -927,13 +944,13 @@ def main(args=None):
     io.wait_for_services()
     guard.wait_for_services()
     if inject != 'none':
-        io.log(f'[가드] 테스트: {inject_after:.0f}초 뒤 \'{inject}\' 사고를 {inject_duration:.1f}초 동안 주입')
+        node.get_logger().info(
+            f'[가드] 테스트: {inject_after:.0f}초 뒤 \'{inject}\' 사고를 {inject_duration:.1f}초 동안 주입')
     if mode == 'real':
         ans = input('[REAL] 실제 로봇이 벽/바닥 쪽으로 움직입니다. 주변 확인 후 y 입력: ')
         if ans.strip().lower() != 'y':
-            io.log('취소했습니다.')
-            node.destroy_node()
-            rclpy.shutdown()
+            node.get_logger().info('취소했습니다.')
+            safe_shutdown(node)
             return
 
     home_policy = 'auto'      # auto: 바로 홈 복귀 / confirm: 작업자 확인 후 (팔 충돌, 안전정지 등)
@@ -945,7 +962,7 @@ def main(args=None):
             io.set_singularity(True)
         io.gripper_close()
         io.move_j(READY_J)
-        io.log(f'[자세] 그리퍼 {TILT_DEG:.0f}° 기울임, TOOL_ORI={TOOL_ORI}')
+        node.get_logger().info(f'[자세] 그리퍼 {TILT_DEG:.0f}° 기울임, TOOL_ORI={TOOL_ORI}')
         guard.zero()                     # 접촉 없는 정지 상태에서 관절 토크 영점
         io.guard = guard                 # 이제부터 모든 직선 이동/탐색을 감시
         m.detect_floor()
@@ -965,7 +982,7 @@ def main(args=None):
                 m.sweep_heights()
             m.summary()
     except KeyboardInterrupt:
-        io.log('사용자 중단 (Ctrl+C)')
+        node.get_logger().info('사용자 중단 (Ctrl+C)')
         io.stop()
     except ToolCollision as e:
         # 툴 충돌이 연속 → 전체 중단. 로봇 자체는 움직일 수 있는 상태
@@ -984,27 +1001,28 @@ def main(args=None):
         node.get_logger().error(f'에러: {e}')
         io.stop()
     finally:
-        try:
-            io.release_press()
-        except Exception as e:
-            node.get_logger().error(f'컴플라이언스 해제 실패: {e}')
-        if m.points or guard.events:
-            m.save()
-        if guard.events:
-            io.log(f'[가드] 이번 실행 사고 기록 {len(guard.events)}건: '
-                   + ', '.join(f'{ev.kind}({ev.context})' for ev in guard.events))
-        go_home_after_stop(io, guard, home_policy)
-        if SINGULARITY_VAR_VEL:
-            try:
+        def save_result():
+            if m.points or guard.events:
+                m.save()
+            if guard.events:
+                node.get_logger().info(
+                    f'[가드] 이번 실행 사고 기록 {len(guard.events)}건: '
+                    + ', '.join(f'{ev.kind}({ev.context})' for ev in guard.events))
+
+        def restore_singularity():
+            if SINGULARITY_VAR_VEL:
                 io.set_singularity(False)          # 다른 프로그램을 위해 기본값으로 복구
-            except Exception as e:
-                node.get_logger().error(f'특이점 처리 복구 실패: {e}')
-        if viz is not None:
-            viz.stop_background()
-            m.update_rviz(force=True)        # 마지막 상태 (TRANSIENT_LOCAL 로 남음)
-        node.destroy_node()
-        if rclpy.ok():
-            rclpy.shutdown()
+
+        def stop_viz():
+            if viz is not None:
+                viz.stop_background()
+                m.update_rviz(force=True)        # 마지막 상태 (TRANSIENT_LOCAL 로 남음)
+
+        safe_shutdown(node, ('컴플라이언스 해제 실패', io.release_press),
+                      ('결과 저장 실패', save_result),
+                      ('홈 복귀 실패', lambda: go_home_after_stop(io, guard, home_policy)),
+                      ('특이점 처리 복구 실패', restore_singularity),
+                      ('RViz 정리 실패', stop_viz))
 
 
 if __name__ == '__main__':
