@@ -108,6 +108,7 @@ def run_robot(args):
     import rclpy
     from dsr_msgs2.srv import (
         GetCurrentPosj, GetCurrentPosx, GetCurrentTcp, MoveLine, SetCtrlBoxDigitalOutput,
+        SetCurrentTcp,
     )
 
     from utils.shutdown import safe_shutdown
@@ -121,12 +122,13 @@ def run_robot(args):
         joints = node.create_client(GetCurrentPosj, f'{controller}/aux_control/get_current_posj')
         pose = node.create_client(GetCurrentPosx, f'{controller}/aux_control/get_current_posx')
         tcp = node.create_client(GetCurrentTcp, f'{controller}/tcp/get_current_tcp')
+        set_tcp = node.create_client(SetCurrentTcp, f'{controller}/tcp/set_current_tcp')
         line = node.create_client(MoveLine, f'{controller}/motion/move_line')
         output = node.create_client(SetCtrlBoxDigitalOutput,
                                     f'{controller}/io/set_ctrl_box_digital_output')
 
         # ===== 서비스 준비 =====
-        for client in (joints, pose, tcp, line, output):
+        for client in (joints, pose, tcp, set_tcp, line, output):
             while not client.wait_for_service(timeout_sec=1.0):
                 print(f'서비스 대기 중: {client.srv_name}', flush=True)
                 if not rclpy.ok():
@@ -151,10 +153,23 @@ def run_robot(args):
                 raise RuntimeError('유효한 BASE TCP 자세를 읽지 못했습니다.')
             return values
 
-        # ===== TCP 및 시작 자세 확인 =====
+        # ===== TCP 적용 및 시작 자세 확인 =====
+        # 컨트롤러를 다시 켜면 현재 TCP 가 비어('') 있으므로, 다르면 여기서 직접 적용한 뒤 다시 읽어 확인한다.
+        # (PICK_POSITION 등 모든 좌표는 GripperDA_v1 TCP 기준)
         active_tcp = call(tcp, GetCurrentTcp.Request(), '현재 TCP 조회').info
         if active_tcp != EXPECTED_TCP:
-            raise RuntimeError(f'현재 TCP가 {active_tcp!r}입니다. {EXPECTED_TCP}을 적용해 주세요.')
+            print(f'현재 TCP가 {active_tcp!r}입니다. {EXPECTED_TCP}을 적용합니다.', flush=True)
+            request = SetCurrentTcp.Request()
+            request.name = EXPECTED_TCP
+            try:
+                call(set_tcp, request, f'TCP {EXPECTED_TCP} 적용')
+            except RuntimeError as e:
+                raise RuntimeError(f'{e}. 티칭 펜던트에 {EXPECTED_TCP} TCP가 등록돼 있는지 확인해 주세요.') from e
+            active_tcp = call(tcp, GetCurrentTcp.Request(), '현재 TCP 재조회').info
+            if active_tcp != EXPECTED_TCP:
+                raise RuntimeError(f'TCP 적용 후에도 현재 TCP가 {active_tcp!r}입니다. '
+                                   f'티칭 펜던트에서 {EXPECTED_TCP}을 확인해 주세요.')
+            print(f'TCP {EXPECTED_TCP} 적용 완료', flush=True)
 
         positions = call(joints, GetCurrentPosj.Request(), '현재 관절각 조회').pos
         if (len(positions) != 6 or not all(map(math.isfinite, positions))

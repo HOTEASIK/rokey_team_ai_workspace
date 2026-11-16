@@ -26,6 +26,12 @@
   POST /api/stop    {run_id?}             run_id 없으면 전부 정지
   POST /api/stdin   {run_id, text}
   POST /api/estop   /   POST /api/estop/reset
+  POST /api/speed   {pct, unlocked}       속도 % (기본 100, 안전 해제 시 최대 200)
+
+[속도 제어]
+  ≤100% : 컨트롤러 속도 오버라이드(motion/change_operation_speed) → 실행 중인 동작에도 바로 적용
+  >100% : '안전 해제' 상태에서만 허용. 새로 시작하는 작업의 속도 파라미터(scale 항목)를 배율만큼 키움
+          (컨트롤러 오버라이드는 100% 가 최대). 비상 정지 시 자동으로 100% · 잠금으로 복귀.
 """
 import itertools
 import json
@@ -47,12 +53,12 @@ from rclpy.node import Node
 from rclpy.callback_groups import ReentrantCallbackGroup
 from sensor_msgs.msg import JointState
 
-from hmi.tasks import MODES, TASK_MAP, catalog, normalize_params, parse_posx
+from hmi.tasks import MODES, TASK_MAP, apply_speed, catalog, normalize_params, parse_posx
 
 try:
     from dsr_msgs2.msg import RobotError
-    from dsr_msgs2.srv import (GetCurrentPosx, GetRobotState, GetToolForce, MoveStop,
-                               ReleaseComplianceCtrl, ReleaseForce)
+    from dsr_msgs2.srv import (ChangeOperationSpeed, GetCurrentPosx, GetRobotState, GetToolForce,
+                               MoveStop, ReleaseComplianceCtrl, ReleaseForce)
     HAVE_DSR = True
 except ImportError:
     HAVE_DSR = False
@@ -81,6 +87,8 @@ BAD_STATES = {3, 5, 6, 9, 10}
 LOG_LEVEL_RE = re.compile(r'\[(DEBUG|INFO|WARN|WARNING|ERROR|FATAL)\]')
 ANSI_RE = re.compile(r'\x1b\[[0-9;]*m')
 STOP_ESCALATE = ((8.0, signal.SIGTERM), (15.0, signal.SIGKILL))
+SPEED_MIN, SPEED_DEFAULT, SPEED_SAFE_MAX, SPEED_UNLOCKED_MAX = 10, 100, 100, 200
+STATE_PERIOD = 0.2   # 화면으로 로봇 상태를 보내는 주기 [s] (5 Hz)
 
 
 def now():
@@ -120,12 +128,15 @@ class EventHub:
             except queue.Full:
                 pass
 
-    def log(self, level, source, message, state=None, run_id=None):
+    def log(self, level, source, message, state=None, run_id=None, raw=None, popup=None):
+        """popup=False : 작업자가 직접 누른 동작의 결과처럼 화면 팝업이 필요 없는 경고."""
         level = {'WARNING': 'WARN', 'FATAL': 'ERROR', 'DEBUG': 'INFO'}.get(level, level)
         if state is None:
             state = {'ERROR': 'FAULT', 'WARN': 'WATCH'}.get(level, 'OK')
         self.publish('log', {'t': now(), 'type': level, 'source': source,
-                             'message': message, 'state': state, 'run_id': run_id})
+                             'message': message, 'state': state, 'run_id': run_id,
+                             'raw': raw if raw is not None else message,
+                             'popup': (level in ('WARN', 'ERROR') and state != 'INPUT') if popup is None else popup})
 
 
 # ============================================================================ 작업 실행
@@ -175,6 +186,33 @@ class TaskManager:
         self.lock = threading.Lock()
         self.runs = []                 # 최근 실행 목록 (끝난 것 포함)
         self.estop = False
+        self.speed_pct = SPEED_DEFAULT
+        self.speed_unlocked = False
+
+    # ------------------------------------------------------------------ 속도
+    def speed_json(self):
+        return {'pct': self.speed_pct, 'unlocked': self.speed_unlocked,
+                'max': SPEED_UNLOCKED_MAX if self.speed_unlocked else SPEED_SAFE_MAX,
+                'min': SPEED_MIN, 'default': SPEED_DEFAULT}
+
+    def set_speed(self, pct, unlocked):
+        unlocked = bool(unlocked)
+        if unlocked and self.estop:
+            raise RuntimeError('비상 정지 상태에서는 속도 안전 해제를 할 수 없습니다.')
+        pct = int(round(float(pct)))
+        limit = SPEED_UNLOCKED_MAX if unlocked else SPEED_SAFE_MAX
+        if not SPEED_MIN <= pct <= limit:
+            raise ValueError(f'속도는 {SPEED_MIN}~{limit}% 사이여야 합니다'
+                             + ('' if unlocked else ' (100% 초과는 안전 해제 필요)'))
+        changed_lock = unlocked != self.speed_unlocked
+        self.speed_pct, self.speed_unlocked = pct, unlocked
+        if changed_lock:
+            self.hub.log('WARN' if unlocked else 'INFO', 'SPEED',
+                         '속도 안전 해제 · 최대 200%' if unlocked else '속도 안전 잠금 · 최대 100%',
+                         state='WATCH' if unlocked else 'OK', popup=False)
+        self.hub.log('WARN' if pct > SPEED_SAFE_MAX else 'INFO', 'SPEED', f'속도 설정 {pct}%', popup=False)
+        self.ros.set_operation_speed(min(pct, SPEED_SAFE_MAX))
+        self.hub.publish('speed', self.speed_json())
 
     # ------------------------------------------------------------------ 조회
     def active_runs(self):
@@ -201,7 +239,7 @@ class TaskManager:
             raise ValueError(f'mode 는 {MODES} 중 하나')
         if self.estop:
             raise RuntimeError('비상 정지 상태입니다. 비상 정지 해제 후 시작하세요.')
-        params = normalize_params(task, raw_params)
+        params = apply_speed(task, normalize_params(task, raw_params), self.speed_pct)
         motion = task['motion'](mode)
 
         with self.lock:
@@ -222,7 +260,10 @@ class TaskManager:
         else:
             commands = task['build'](mode, params)
             threading.Thread(target=self._run_commands, args=(run, commands), daemon=True).start()
-        self.hub.log('INFO', 'HMI', f'시작: {task["label"]} · 모드={"가상" if mode == "virtual" else "실제 로봇"} · 실행 #{run.id}', run_id=run.id)
+        if motion:
+            self.ros.set_operation_speed(min(self.speed_pct, SPEED_SAFE_MAX))
+        self.hub.log('INFO', 'HMI', f'시작: {task["label"]} · 모드={"가상" if mode == "virtual" else "실제 로봇"}'
+                                    f' · 속도 {self.speed_pct}% · 실행 #{run.id}', run_id=run.id)
         self._changed()
         return run
 
@@ -328,10 +369,10 @@ class TaskManager:
         msg = re.sub(r'^\[[A-Z]+\]\s*\[[\d.]+\]\s*\[[^\]]*\]:\s*', '', text)
         if prompt:
             run.awaiting_input = True
-            self.hub.log('WARN', source, msg, state='INPUT', run_id=run.id)
+            self.hub.log('WARN', source, msg, state='INPUT', run_id=run.id, raw=text)
             self._changed()
         else:
-            self.hub.log(level, source, msg, run_id=run.id)
+            self.hub.log(level, source, msg, run_id=run.id, raw=text)
 
     def send_stdin(self, run_id, text):
         run = self.get(run_id)
@@ -359,7 +400,7 @@ class TaskManager:
             else:
                 self._finish(run, 'stopped')
             self.hub.log('WARN', 'HMI', f'정지 요청: {run.task["label"]} ({signal.Signals(sig).name}) · 실행 #{run.id}',
-                         state='STOP', run_id=run.id)
+                         state='STOP', run_id=run.id, popup=False)
         return len(targets)
 
     def _signal(self, run, sig):
@@ -395,11 +436,16 @@ class TaskManager:
             else:
                 self._signal(run, signal.SIGKILL)
         threading.Timer(0.3, self.ros.release_force).start()
+        if self.speed_unlocked or self.speed_pct > SPEED_SAFE_MAX:
+            self.speed_unlocked = False
+            self.speed_pct = min(self.speed_pct, SPEED_SAFE_MAX)
+            self.hub.log('WARN', 'SPEED', f'비상 정지 → 속도 안전 잠금 ({self.speed_pct}%)')
+            self.hub.publish('speed', self.speed_json())
         self._changed()
 
     def reset_estop(self):
         self.estop = False
-        self.hub.log('WARN', 'SAFETY', '비상 정지 해제 · 작업자 확인 완료', state='ARMED')
+        self.hub.log('WARN', 'SAFETY', '비상 정지 해제 · 작업자 확인 완료', state='ARMED', popup=False)
 
     def shutdown(self):
         for run in self.active_runs():
@@ -416,7 +462,7 @@ class HmiNode(Node):
         self.host = self.declare_parameter('host', '127.0.0.1').value
         self.port = int(self.declare_parameter('port', 8080).value)
         self.web_root = self.declare_parameter('web_root', '').value
-        poll_hz = float(self.declare_parameter('poll_hz', 2.0).value)
+        poll_hz = float(self.declare_parameter('poll_hz', 5.0).value)
 
         rid = self.robot_id
         ctrl = f'/{rid}/dsr_controller2'
@@ -441,6 +487,7 @@ class HmiNode(Node):
                 ('move_stop', MoveStop, 'motion/move_stop'),
                 ('release_force', ReleaseForce, 'force/release_force'),
                 ('release_compliance', ReleaseComplianceCtrl, 'force/release_compliance_ctrl'),
+                ('speed', ChangeOperationSpeed, 'motion/change_operation_speed'),
             ):
                 self.dsr_clients[key] = self.create_client(srv, f'{ctrl}/{name}', callback_group=self.cb)
         else:
@@ -551,6 +598,25 @@ class HmiNode(Node):
         req.stop_mode = DR_QSTOP
         cli.call_async(req).add_done_callback(
             lambda f: self.hub.log('WARN', 'SAFETY', f'move_stop 응답: 성공={getattr(f.result(), "success", None)}'))
+
+    def set_operation_speed(self, pct):
+        """컨트롤러 전체 속도 오버라이드 (1~100%). 실행 중인 동작에도 적용된다."""
+        cli = self.dsr_clients.get('speed')
+        if cli is None or not cli.service_is_ready():
+            self.hub.log('WARN', 'SPEED', 'change_operation_speed 서비스 없음 → 컨트롤러 속도는 바뀌지 않았습니다 '
+                                          '(100% 초과 배율은 새로 시작하는 작업에 적용)', popup=False)
+            return
+        req = ChangeOperationSpeed.Request()
+        req.speed = int(max(1, min(100, pct)))
+
+        def done(f):
+            try:
+                ok = f.result().success
+            except Exception:
+                ok = False
+            if not ok:
+                self.hub.log('ERROR', 'SPEED', f'컨트롤러 속도 {req.speed}% 설정 실패')
+        cli.call_async(req).add_done_callback(done)
 
     def release_force(self):
         for key, srv in (('release_force', ReleaseForce if HAVE_DSR else None),
@@ -695,11 +761,17 @@ def make_handler(app):
             try:
                 send({'event': 'backlog', 'data': [m['data'] for m in backlog]})
                 send({'event': 'state', 'data': app.state()})
+                # 로봇 상태(관절각·TCP)는 로그가 계속 들어와도 STATE_PERIOD 마다 반드시 보낸다.
+                # (예전에는 0.5초 동안 다른 이벤트가 없을 때만 보내서, 작업 중 로그가 많으면 화면이 멈췄음)
+                next_state = time.monotonic() + STATE_PERIOD
                 while app.running:
                     try:
-                        send(q.get(timeout=0.5))
+                        send(q.get(timeout=max(0.0, next_state - time.monotonic())))
                     except queue.Empty:
+                        pass
+                    if time.monotonic() >= next_state:
                         send({'event': 'state', 'data': app.state()})
+                        next_state = time.monotonic() + STATE_PERIOD
             except (BrokenPipeError, ConnectionResetError, OSError):
                 pass
             finally:
@@ -725,12 +797,15 @@ def make_handler(app):
                 if path == '/api/estop':
                     m.emergency_stop()
                     return self._json(200, {'ok': True})
+                if path == '/api/speed':
+                    m.set_speed(body.get('pct', SPEED_DEFAULT), body.get('unlocked', False))
+                    return self._json(200, {'ok': True, 'speed': m.speed_json()})
                 if path == '/api/estop/reset':
                     m.reset_estop()
                     return self._json(200, {'ok': True})
                 return self._json(404, {'ok': False, 'error': 'not found'})
             except (ValueError, RuntimeError, TypeError) as e:
-                app.hub.log('WARN', 'HMI', f'요청 거부: {e}', state='REJECT')
+                app.hub.log('WARN', 'HMI', f'요청 거부: {e}', state='REJECT', popup=False)
                 return self._json(400, {'ok': False, 'error': str(e)})
 
     return Handler
@@ -748,6 +823,7 @@ class HmiApp:
     def state(self):
         return {
             't': now(), 'estop': self.manager.estop, 'runs': self.manager.snapshot(),
+            'speed': self.manager.speed_json(),
             'robot': self.node.robot_snapshot(), 'links': self.node.links(),
             'robot_id': self.node.robot_id,
         }
