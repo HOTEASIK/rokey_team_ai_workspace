@@ -12,6 +12,12 @@
   <depend>action_msgs</depend>
   <depend>dsr_msgs2</depend>
   <depend>dsr_common2</depend>
+  <depend>sensor_msgs</depend>
+  <depend>geometry_msgs</depend>
+  <depend>visualization_msgs</depend>
+  <depend>rokey_interfaces</depend>
+  <depend>onrobot_rg_msgs</depend>
+  <exec_depend>ament_index_python</exec_depend>
 
   <test_depend>ament_copyright</test_depend>
   <test_depend>ament_flake8</test_depend>

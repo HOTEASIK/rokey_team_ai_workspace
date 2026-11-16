@@ -1,0 +1,149 @@
+/* rokey1 HMI 추가 스타일 (styles.css 위에 덮어씀) */
+.link-dot{background:#5a5f60}
+.link-dot.red{background:var(--red);box-shadow:0 0 7px var(--red)}
+.bridge-chip.down{color:var(--red);border-color:rgba(240,93,94,.55)}
+.bridge-chip.down .pulse-dot{background:var(--red)}
+.device-row{cursor:default}
+.device-row .link-icon{font-family:var(--mono);font-size:7px;color:#6d7473;margin-left:8px;min-width:46px;text-align:right}
+.mode-value.bad{color:var(--red)}
+.mode-value.bad span{background:var(--red);box-shadow:0 0 8px var(--red)}
+
+/* --- 작업 선택 --- */
+.task-tabs{display:grid;grid-template-columns:repeat(3,1fr);margin:0 12px 8px;border:1px solid #555a5a}
+.task-tab{height:28px;border:0;background:#2a2d2f;color:#8d9391;font-family:var(--mono);font-size:9px;letter-spacing:.08em;cursor:pointer}
+.task-tab+.task-tab{border-left:1px solid #555a5a}
+.task-tab.active{background:var(--orange);color:#1b1c1d;font-weight:700}
+.task-list{display:grid;grid-template-columns:1fr 1fr;gap:5px;margin:0 12px}
+.task-item{display:flex;justify-content:space-between;align-items:center;gap:6px;height:28px;padding:0 8px;border:1px solid #4a4f50;background:#2b2e30;color:#d6d6d0;cursor:pointer;text-align:left}
+.task-item b{font-size:9px;letter-spacing:.04em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.task-item small{font-family:var(--mono);font-size:7px;color:#747b7a}
+.task-item.active{border-color:var(--orange);background:#3e311e;color:#ffb66d}
+.task-desc{margin:8px 12px 6px;color:#9aa09f;font-size:9px;line-height:1.45;min-height:13px}
+.param-grid{display:grid;grid-template-columns:1fr 1fr;gap:6px 8px;margin:0 12px 10px;max-height:230px;overflow:auto;scrollbar-width:thin}
+.param-field{display:flex;flex-direction:column;gap:3px;min-width:0}
+.param-field.wide{grid-column:1 / -1}
+.param-field.bool{flex-direction:row;align-items:center;justify-content:space-between;border:1px solid #3d4243;padding:0 6px;height:26px;align-self:end}
+.param-field>span{font-size:8px;color:#8e9494;letter-spacing:.04em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.param-field input[type=text],.param-field input[type=number],.param-field select,.stdin-bar select,.stdin-bar input{height:24px;background:#1b1d1f;border:1px solid #4a4f50;color:var(--text);font-family:var(--mono);font-size:9px;padding:0 6px;min-width:0;width:100%}
+.param-field input:focus,.param-field select:focus,.stdin-bar input:focus{outline:1px solid var(--orange);border-color:var(--orange)}
+.param-empty{grid-column:1 / -1;color:#6f7675;font-size:9px;padding:4px 0}
+.switch{position:relative;width:28px;height:14px;flex:0 0 auto}
+.switch input{opacity:0;width:0;height:0}
+.switch span{position:absolute;inset:0;background:#3a3e40;border-radius:7px;cursor:pointer;transition:.2s}
+.switch span:before{content:'';position:absolute;width:10px;height:10px;left:2px;top:2px;background:#9aa0a0;border-radius:50%;transition:.2s}
+.switch input:checked+span{background:#7a4a1c}
+.switch input:checked+span:before{transform:translateX(14px);background:var(--orange)}
+.real-warning{margin:0 12px 9px;padding:6px 8px;border:1px solid #9f3f42;background:#3a2224;color:#ff9b9d;font-size:9px;font-weight:700}
+.control-module .action-row{padding:0 12px 10px;gap:8px}
+.action-btn:disabled{opacity:.4;cursor:not-allowed}
+.command-readout b,.command-readout small{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:300px}
+.command-readout{width:100%}
+
+/* --- 진행률 (끝을 알 수 없는 작업) --- */
+.progress-track.indeterminate span{width:30%!important;animation:indet 1.4s ease-in-out infinite}
+.progress-track.indeterminate i{display:none}
+@keyframes indet{0%{margin-left:-30%}100%{margin-left:100%}}
+.progress-track{overflow:hidden}
+
+/* --- 힘 --- */
+.force-ring:before{display:none}
+.force-ring span{position:absolute;inset:-3px;border-radius:50%;border:3px solid transparent;border-top-color:var(--orange);border-right-color:var(--orange);transition:transform .4s}
+.force-axes{grid-template-columns:repeat(3,1fr)}
+
+/* --- 실행 기록 --- */
+.run-list{display:flex;flex-direction:column;margin:0 10px;max-height:150px;overflow:auto;scrollbar-width:thin}
+.run-item{display:grid;grid-template-columns:28px 1fr auto 34px 18px;gap:6px;align-items:center;padding:4px 0;border-bottom:1px solid rgba(255,255,255,.04);font-family:var(--mono);font-size:8px;color:#adb2b1}
+.run-item span{overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+.run-item time{color:#737a78;text-align:right}
+.run-item em{font-style:normal}
+.run-item.live em{color:var(--green)}
+.run-item.ok em{color:#9fd8c4}
+.run-item.bad em{color:var(--red)}
+.run-item.muted em{color:var(--amber)}
+.run-item button{border:1px solid #875622;background:#3e311e;color:#ffb66d;font-size:7px;height:16px;padding:0;cursor:pointer}
+
+/* --- 작업 공간 뷰 --- */
+.viz-grid{display:grid;grid-template-columns:1fr 1fr;gap:1px;background:#3a4142;min-width:0}
+.viz-panel{position:relative;background-color:#1d2728;min-height:0;display:flex}
+.viz-panel svg{width:100%;height:100%;min-height:260px}
+.viz-panel .g{stroke:rgba(75,133,130,.16);stroke-width:2}
+.viz-panel .g.axis{stroke:rgba(126,200,255,.35);stroke-width:3}
+.viz-panel .reach{fill:rgba(255,122,26,.03);stroke:rgba(255,122,26,.35);stroke-width:4;stroke-dasharray:18 14}
+.viz-panel .base{fill:#3a4142;stroke:#8e9494;stroke-width:4}
+.viz-panel .floor{stroke:#8e9494;stroke-width:4}
+.viz-panel .trail{fill:none;stroke:var(--blue);stroke-width:6;opacity:.75;stroke-linejoin:round}
+.viz-panel .arm{stroke:rgba(255,153,71,.55);stroke-width:10;stroke-linecap:round}
+.viz-panel .tcp{fill:var(--orange);stroke:#fff;stroke-width:5}
+.viz-panel .lbl{fill:#5f8580;font-family:var(--mono);font-size:44px}
+.viz-panel .tcp-l{fill:#ffb66d}
+.viz-panel .nodata{fill:#8e9494;font-size:60px}
+.position-values.three{gap:10px}
+.position-values.three b{font-size:12px}
+.joint-list{display:flex;flex-direction:column;gap:5px;margin-top:8px}
+.joint-row{display:grid;grid-template-columns:18px 1fr 44px;gap:6px;align-items:center;font-family:var(--mono);font-size:8px;color:#8e9494}
+.joint-row b{color:#e6e6df;text-align:right;font-weight:500}
+.joint-bar{height:4px;background:#111315;position:relative}
+.joint-bar:before{content:'';position:absolute;left:50%;top:-2px;width:1px;height:8px;background:#4a4f50}
+.joint-bar i{position:absolute;top:-2px;width:3px;height:8px;margin-left:-1px;background:var(--orange);transition:left .3s}
+.simulation-card.focused{position:fixed;inset:20px;z-index:50;box-shadow:0 0 0 9999px rgba(0,0,0,.7)}
+.simulation-card.focused .viz-panel svg{min-height:60vh}
+
+/* --- 콘솔 --- */
+.console-log{max-height:220px}
+.log-row.prompt{background:rgba(244,189,93,.08)}
+.log-message{overflow:hidden;white-space:nowrap;text-overflow:ellipsis;padding-right:8px}
+.stdin-bar{display:grid;grid-template-columns:62px 150px 1fr auto auto auto;gap:6px;align-items:center;padding:7px 14px;border-top:1px solid var(--line-soft);background:#25292b}
+.stdin-bar.waiting{background:#3a3020;box-shadow:inset 3px 0 0 var(--amber)}
+.stdin-label{font-family:var(--mono);font-size:8px;color:#8e9494;letter-spacing:.08em}
+.stdin-bar.waiting .stdin-label{color:var(--amber)}
+.auto-scroll input{margin:0;accent-color:var(--green)}
+
+/* --- 토스트 --- */
+.toast{position:fixed;right:24px;bottom:24px;z-index:100;max-width:460px;padding:12px 16px;font-size:11px;line-height:1.5;border:1px solid #9f3f42;background:#3a2224;color:#ffd0d1;box-shadow:0 8px 24px rgba(0,0,0,.4)}
+.toast.warn{border-color:#875622;background:#3e311e;color:#ffd9b0}
+
+/* ===== 왼쪽 패널 하단 잘림 수정 =====
+   원인 1) 패널(.control-rail)이 세로 flex 이고 각 모듈이 overflow:hidden 이라,
+           공간이 모자라면 모듈이 스크롤되지 않고 '납작하게 줄어들며' 아래가 잘렸다.
+           → 모듈이 줄어들지 않게(flex-shrink:0) 하고 패널 자체를 스크롤.
+   원인 2) 최대 높이(100vh - 116px)가 상단바 74 + 하단바 26 + 여백 30 보다 작아
+           마지막 모듈이 화면 밖으로 밀렸다. → 높이 계산 수정 + 화면에 고정(sticky). */
+.control-rail>*{flex-shrink:0}
+.control-rail{position:sticky;top:10px;align-self:start;max-height:calc(100vh - 140px);padding-bottom:14px;overscroll-behavior:contain}
+.history-module{padding-bottom:10px}
+.run-list{max-height:none}
+@media (max-height:850px){.control-rail{max-height:calc(100vh - 128px)}}
+
+/* ===== 한글 가독성 (작은 글씨 + 넓은 자간은 한글에서 읽기 어려움) ===== */
+.eyebrow{letter-spacing:.08em}
+.module-head{font-size:10px;letter-spacing:.05em}
+.label,.label-row span,.mode-line>.label,.slider-wrap .label-row span{font-size:9px;letter-spacing:.03em}
+.tiny-status,.hot-tag{letter-spacing:.02em}
+.device-row b{font-size:10px;min-width:96px}
+.device-row small{font-size:9px}
+.comm-cell span:not(.link-dot),.sensor-reading span:not(.sensor-icon){font-size:8.5px;letter-spacing:0}
+.comm-cell b{font-size:9px}
+.metric>span{letter-spacing:.03em}
+.safety-list span{font-size:9px;letter-spacing:0}
+.safety-banner small{font-size:9px}
+.estop-btn small{font-size:8px;letter-spacing:.02em}
+.action-btn{font-size:11px;letter-spacing:.04em}
+.task-tab{font-family:var(--sans);font-size:11px;font-weight:700;letter-spacing:.02em}
+.task-item b{font-size:10px;letter-spacing:0}
+.task-item small{font-family:var(--sans);font-size:8px}
+.param-field>span{font-size:9px;letter-spacing:0}
+.mode-btn{font-family:var(--sans);font-size:9px;font-weight:700}
+.console-table-head{font-family:var(--sans);font-size:9px}
+.log-row{font-size:9px}
+.log-type,.log-state{font-family:var(--sans)}
+.console-filter,.filter-btn{font-family:var(--sans);font-size:9px}
+.stdin-bar{grid-template-columns:70px 150px 1fr auto auto auto}
+.stdin-label{font-family:var(--sans);font-size:9px;letter-spacing:0}
+.run-item{font-size:9px;grid-template-columns:28px 1fr auto 36px 18px}
+.run-item em{font-family:var(--sans)}
+.footer-stat,.sim-hint,.telemetry-foot,.app-footer{font-family:var(--sans)}
+.map-corner{font-family:var(--sans);font-size:9px}
+.viz-panel .lbl{font-family:var(--sans)}
+.joint-row{font-size:9px}
+.position-values small{font-size:8px}
+.operator-avatar{font-family:var(--sans);font-size:8px}
