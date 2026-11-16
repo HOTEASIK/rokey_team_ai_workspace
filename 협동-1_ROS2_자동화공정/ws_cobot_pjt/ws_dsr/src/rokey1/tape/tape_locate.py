@@ -23,13 +23,10 @@ import os
 
 import numpy as np
 import rclpy
-import DR_init
 
+from utils.aspects import dsr_main
 from utils.move_stop import MoveStopClient
-from utils.shutdown import safe_shutdown
 
-ROBOT_ID = 'dsr01'
-ROBOT_MODEL = 'm0609'
 TOOL_NAME = 'Tool Weight'
 TCP_NAME = 'GripperDA_v1'
 
@@ -69,100 +66,98 @@ def save_model(center, source, extra=None):
     print(f'\nros2 launch rokey1 tape_display.launch.py x:={x:.4f} y:={y:.4f} z:={z:.4f}')
 
 
-def main(args=None):
+def parse_options(args=None):
     parser = argparse.ArgumentParser()
     parser.add_argument('mode', choices=['teach', 'probe'])
     parser.add_argument('--y-offset', type=float, default=0.0)
     parser.add_argument('--center', type=float, nargs=3)
-    opt = parser.parse_args(rclpy.utilities.remove_ros_args(args)[1:])
+    return parser.parse_args(rclpy.utilities.remove_ros_args(args)[1:])
 
-    rclpy.init(args=args)
-    DR_init.__dsr__id = ROBOT_ID
-    DR_init.__dsr__model = ROBOT_MODEL
-    node = rclpy.create_node('tape_locate', namespace=ROBOT_ID)
-    DR_init.__dsr__node = node
 
-    try:
-        import DSR_ROBOT2 as robot
-        from DSR_ROBOT2 import posj, posx
-    except ImportError as e:
-        node.get_logger().info(f'Error importing DSR_ROBOT2 : {e}')
+@dsr_main('tape_locate')
+def run(app, opt):
+    node = app.node
+
+    import DSR_ROBOT2 as robot
+    from DSR_ROBOT2 import posj, posx
+
+    if opt.mode == 'teach':
+        p = robot.get_current_posx()[0]
+        save_model([p[0], p[1] + opt.y_offset, p[2]], 'teach')
         return
 
-    try:
-        if opt.mode == 'teach':
-            p = robot.get_current_posx()[0]
-            save_model([p[0], p[1] + opt.y_offset, p[2]], 'teach')
-            return
+    # ---------------- probe ----------------
+    if opt.center:
+        xc, yc, zc = opt.center
+    else:
+        with open(MODEL_FILE) as f:
+            xc, yc, zc = json.load(f)['center_mm']
+    node.get_logger().info(f'대략 중심: ({xc:.1f}, {yc:.1f}, {zc:.1f})')
 
-        # ---------------- probe ----------------
-        if opt.center:
-            xc, yc, zc = opt.center
-        else:
-            with open(MODEL_FILE) as f:
-                xc, yc, zc = json.load(f)['center_mm']
-        node.get_logger().info(f'대략 중심: ({xc:.1f}, {yc:.1f}, {zc:.1f})')
+    stopper = MoveStopClient(node)
 
-        stopper = MoveStopClient(node)
+    def quick_stop():
+        stopper.stop(robot.DR_QSTOP)
 
-        def quick_stop():
-            stopper.stop(robot.DR_QSTOP)
+    def force():
+        return np.array(robot.get_tool_force(robot.DR_BASE)[:3])
 
-        def force():
-            return np.array(robot.get_tool_force(robot.DR_BASE)[:3])
+    def pt(theta_deg, dist):
+        """중심에서 theta 방향으로 dist 떨어진 점 (XZ 평면)."""
+        t = math.radians(theta_deg)
+        return posx(xc + dist * math.sin(t), yc, zc + dist * math.cos(t), *PROBE_ORI)
 
-        def pt(theta_deg, dist):
-            """중심에서 theta 방향으로 dist 떨어진 점 (XZ 평면)."""
-            t = math.radians(theta_deg)
-            return posx(xc + dist * math.sin(t), yc, zc + dist * math.cos(t), *PROBE_ORI)
+    robot.set_robot_mode(robot.ROBOT_MODE_MANUAL)
+    robot.set_tool(TOOL_NAME)
+    robot.set_tcp(TCP_NAME)
+    robot.set_robot_mode(robot.ROBOT_MODE_AUTONOMOUS)
 
-        robot.set_robot_mode(robot.ROBOT_MODE_MANUAL)
-        robot.set_tool(TOOL_NAME)
-        robot.set_tcp(TCP_NAME)
-        robot.set_robot_mode(robot.ROBOT_MODE_AUTONOMOUS)
+    def mv(p):
+        if robot.movel(p, vel=MOVE_VELOCITY, acc=ACC) < 0:
+            raise RuntimeError(f'movel 실패: {list(p)}')
 
-        def mv(p):
-            if robot.movel(p, vel=MOVE_VELOCITY, acc=ACC) < 0:
-                raise RuntimeError(f'movel 실패: {list(p)}')
+    # 관절 0 자세(특이점)에서는 movel 이 실패하므로 홈부터 간다
+    if robot.movej(posj(*HOME), vel=30, acc=60) < 0:
+        raise RuntimeError('movej HOME 실패')
 
-        # 관절 0 자세(특이점)에서는 movel 이 실패하므로 홈부터 간다
-        if robot.movej(posj(*HOME), vel=30, acc=60) < 0:
-            raise RuntimeError('movej HOME 실패')
+    safe_z = zc + ROLL_R + SAFE_DZ
+    hits = []
+    for th in PROBE_ANGLES:
+        start = pt(th, ROLL_R + START_GAP)
+        above = list(start)
+        above[2] = safe_z
+        mv(posx(*above))
+        mv(start)
+        robot.wait(0.5)
+        base = force()
+        robot.amovel(pt(th, ROLL_R - MAX_DEPTH), vel=PROBE_VELOCITY, acc=ACC)
+        hit = False
+        while robot.check_motion() != robot.DR_STATE_IDLE:
+            if np.linalg.norm(force() - base) > FORCE_THRESHOLD:
+                quick_stop()
+                hit = True
+                break
+        robot.wait(0.3)
+        p = robot.get_current_posx()[0]
+        mv(start)
+        mv(posx(*above))
+        if not hit:
+            raise RuntimeError(f'{th}° 에서 접촉 없음 → 대략 중심 확인')
+        node.get_logger().info(f'{th:+.0f}° 접촉: x={p[0]:.2f} z={p[2]:.2f}')
+        hits.append([th, p[0], p[2]])
 
-        safe_z = zc + ROLL_R + SAFE_DZ
-        hits = []
-        for th in PROBE_ANGLES:
-            start = pt(th, ROLL_R + START_GAP)
-            above = list(start)
-            above[2] = safe_z
-            mv(posx(*above))
-            mv(start)
-            robot.wait(0.5)
-            base = force()
-            robot.amovel(pt(th, ROLL_R - MAX_DEPTH), vel=PROBE_VELOCITY, acc=ACC)
-            hit = False
-            while robot.check_motion() != robot.DR_STATE_IDLE:
-                if np.linalg.norm(force() - base) > FORCE_THRESHOLD:
-                    quick_stop()
-                    hit = True
-                    break
-            robot.wait(0.3)
-            p = robot.get_current_posx()[0]
-            mv(start)
-            mv(posx(*above))
-            if not hit:
-                raise RuntimeError(f'{th}° 에서 접촉 없음 → 대략 중심 확인')
-            node.get_logger().info(f'{th:+.0f}° 접촉: x={p[0]:.2f} z={p[2]:.2f}')
-            hits.append([th, p[0], p[2]])
+    _, xs, zs = zip(*hits)
+    fx, fz, fr, rms = fit_circle(xs, zs)
+    node.get_logger().info(
+        f'피팅: 중심 x={fx:.2f} z={fz:.2f}, r={fr:.2f} (롤 {ROLL_R} + 손끝), rms={rms:.2f}mm')
+    save_model([fx, yc, fz], 'probe',
+               {'fit_r_mm': round(fr, 2), 'rms_mm': round(rms, 3), 'hits': hits})
 
-        _, xs, zs = zip(*hits)
-        fx, fz, fr, rms = fit_circle(xs, zs)
-        node.get_logger().info(
-            f'피팅: 중심 x={fx:.2f} z={fz:.2f}, r={fr:.2f} (롤 {ROLL_R} + 손끝), rms={rms:.2f}mm')
-        save_model([fx, yc, fz], 'probe',
-                   {'fit_r_mm': round(fr, 2), 'rms_mm': round(rms, 3), 'hits': hits})
-    finally:
-        safe_shutdown(node)
+
+def main(args=None):
+    # 인자 파싱은 rclpy.init 전에 해서 잘못된 인자면 노드를 띄우지 않는다
+    opt = parse_options(args)
+    return run(args, opt)
 
 
 if __name__ == '__main__':

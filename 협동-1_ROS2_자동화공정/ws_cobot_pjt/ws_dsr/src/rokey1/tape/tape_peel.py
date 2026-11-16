@@ -19,14 +19,9 @@
 [실행]
   ros2 run rokey1 tape_peel
 """
-import rclpy
-import DR_init
-
+from utils.aspects import dsr_main
 from utils.move_stop import MoveStopClient
-from utils.shutdown import safe_shutdown
 
-ROBOT_ID = 'dsr01'
-ROBOT_MODEL = 'm0609'
 TOOL_NAME = 'Tool Weight'
 TCP_NAME = 'GripperDA_v1'
 
@@ -48,19 +43,12 @@ PULL_VELOCITY = [20.0, 10.0]
 PULL_ACC = [50.0, 30.0]
 
 
-def main(args=None):
-    rclpy.init(args=args)
-    DR_init.__dsr__id = ROBOT_ID
-    DR_init.__dsr__model = ROBOT_MODEL
-    node = rclpy.create_node('tape_peel', namespace=ROBOT_ID)
-    DR_init.__dsr__node = node
+@dsr_main('tape_peel')
+def main(app):
+    node = app.node
 
-    try:
-        import DSR_ROBOT2 as robot
-        from DSR_ROBOT2 import posj, posx
-    except ImportError as e:
-        node.get_logger().info(f'Error importing DSR_ROBOT2 : {e}')
-        return
+    import DSR_ROBOT2 as robot
+    from DSR_ROBOT2 import posj, posx
 
     stopper = MoveStopClient(node)
 
@@ -75,48 +63,45 @@ def main(args=None):
     def tool_fz():
         return robot.get_tool_force(robot.DR_TOOL)[2]
 
-    try:
-        robot.set_robot_mode(robot.ROBOT_MODE_MANUAL)
-        robot.set_tool(TOOL_NAME)
-        robot.set_tcp(TCP_NAME)
-        robot.set_robot_mode(robot.ROBOT_MODE_AUTONOMOUS)
+    robot.set_robot_mode(robot.ROBOT_MODE_MANUAL)
+    robot.set_tool(TOOL_NAME)
+    robot.set_tcp(TCP_NAME)
+    robot.set_robot_mode(robot.ROBOT_MODE_AUTONOMOUS)
 
-        # 1) 접근
-        robot.movej(posj(*HOME), vel=30, acc=60)
-        gripper(close=False)
-        approach = list(P_START)
-        approach[2] += APPROACH_OFFSET
+    # 1) 접근
+    robot.movej(posj(*HOME), vel=30, acc=60)
+    gripper(close=False)
+    approach = list(P_START)
+    approach[2] += APPROACH_OFFSET
+    robot.movel(posx(*approach), vel=APPROACH_VELOCITY, acc=APPROACH_ACC)
+    robot.movel(posx(*P_START), vel=SCAN_VELOCITY, acc=SCAN_ACC)
+    robot.wait(0.5)
+
+    # 2) 원호 탐색 + 반력 감시
+    base = tool_fz()
+    node.get_logger().info(f'baseline Fz = {base:.2f} N')
+    robot.amovec(posx(*P_MID), posx(*P_END), vel=SCAN_VELOCITY, acc=SCAN_ACC)
+    found = False
+    while robot.check_motion() != robot.DR_STATE_IDLE:
+        dF = tool_fz() - base
+        node.get_logger().info(f'dF = {dF:+.2f} N')
+        if abs(dF) > FORCE_THRESHOLD:
+            quick_stop()
+            found = True
+            break
+
+    if not found:
+        node.get_logger().info('끝단을 찾지 못함 → 후퇴')
         robot.movel(posx(*approach), vel=APPROACH_VELOCITY, acc=APPROACH_ACC)
-        robot.movel(posx(*P_START), vel=SCAN_VELOCITY, acc=SCAN_ACC)
-        robot.wait(0.5)
+        return
+    node.get_logger().info(f'끝단 감지 @ {robot.get_current_posx()[0]}')
 
-        # 2) 원호 탐색 + 반력 감시
-        base = tool_fz()
-        node.get_logger().info(f'baseline Fz = {base:.2f} N')
-        robot.amovec(posx(*P_MID), posx(*P_END), vel=SCAN_VELOCITY, acc=SCAN_ACC)
-        found = False
-        while robot.check_motion() != robot.DR_STATE_IDLE:
-            dF = tool_fz() - base
-            node.get_logger().info(f'dF = {dF:+.2f} N')
-            if abs(dF) > FORCE_THRESHOLD:
-                quick_stop()
-                found = True
-                break
-
-        if not found:
-            node.get_logger().info('끝단을 찾지 못함 → 후퇴')
-            robot.movel(posx(*approach), vel=APPROACH_VELOCITY, acc=APPROACH_ACC)
-            return
-        node.get_logger().info(f'끝단 감지 @ {robot.get_current_posx()[0]}')
-
-        # 3) 잡고 당기기 (진행 반대 방향 = Tool -Z)
-        robot.wait(0.5)
-        gripper(close=True)
-        robot.movel(posx(0, 0, -PULL_DIST, 0, 0, 0), vel=PULL_VELOCITY, acc=PULL_ACC,
-                    ref=robot.DR_TOOL, mod=robot.DR_MV_MOD_REL)
-        node.get_logger().info('떼어내기 완료')
-    finally:
-        safe_shutdown(node)
+    # 3) 잡고 당기기 (진행 반대 방향 = Tool -Z)
+    robot.wait(0.5)
+    gripper(close=True)
+    robot.movel(posx(0, 0, -PULL_DIST, 0, 0, 0), vel=PULL_VELOCITY, acc=PULL_ACC,
+                ref=robot.DR_TOOL, mod=robot.DR_MV_MOD_REL)
+    node.get_logger().info('떼어내기 완료')
 
 
 if __name__ == '__main__':
