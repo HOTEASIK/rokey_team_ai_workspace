@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#242629" />
+    <title>M0609 · ROS2 Command Center</title>
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="topbar">
+        <div class="brand-block">
+          <div class="brand-mark"><span></span><span></span><span></span></div>
+          <div>
+            <div class="eyebrow">INDUSTRIAL ROBOT OPERATIONS</div>
+            <div class="brand-name">M0609 <b>/</b> ROS2 COMMAND CENTER</div>
+          </div>
+        </div>
+        <div class="topbar-actions">
+          <div class="bridge-chip"><span class="pulse-dot"></span> DEMO BRIDGE</div>
+          <div class="top-clock"><span id="topClock">10:09:55</span><small>KST · MON 16 NOV 2026</small></div>
+          <div class="operator-chip"><span class="operator-avatar">OP</span><span><b>OPERATOR 04</b><small>CONTROL DESK A</small></span></div>
+        </div>
+      </header>
+
+      <main class="workspace">
+        <aside class="control-rail">
+          <div class="rail-header">
+            <div>
+              <div class="eyebrow orange">UNIT 04 · ONLINE</div>
+              <h1>COMMAND<br />STACK</h1>
+            </div>
+            <div class="rail-meta"><b>M0609</b><span>v2.4.1</span></div>
+          </div>
+
+          <section class="module state-module">
+            <div class="module-head"><span class="module-index">01</span><span>STATE PANEL</span><span class="module-rule"></span><span class="tiny-status live">LIVE</span></div>
+            <div class="state-hero"><div><span class="label">CURRENT TASK</span><strong id="taskName">PALLET TRANSFER</strong><span class="muted">Dock A → Dock B · job #2481</span></div><div class="status-stamp" id="statusStamp"><i></i><b id="statusText">RUNNING</b></div></div>
+            <div class="progress-row"><div class="label-row"><span>WORK PROGRESS</span><b id="progressValue">68%</b></div><div class="progress-track"><span id="progressBar"></span><i></i></div></div>
+            <div class="metric-grid"><div class="metric"><span>LINEAR</span><b><em id="linearSpeed">0.42</em> <small>m/s</small></b></div><div class="metric"><span>ANGULAR</span><b><em id="angularSpeed">0.08</em> <small>rad/s</small></b></div></div>
+            <div class="mode-line"><span class="label">OPERATION MODE</span><div class="mode-value" id="modeValue"><span></span>AUTO</div></div>
+            <div class="device-list"><div class="label">PERIPHERAL LINKS</div><button class="device-row link-toggle" data-device="Conveyer"><span class="led"></span><b>CONVEYER</b><small id="ConveyerState">CONNECTED</small><span class="link-icon">↗</span></button><button class="device-row link-toggle" data-device="Motor"><span class="led"></span><b>MOTOR</b><small id="MotorState">CONNECTED</small><span class="link-icon">↗</span></button><button class="device-row link-toggle" data-device="PLC"><span class="led"></span><b>PLC</b><small id="PLCState">CONNECTED</small><span class="link-icon">↗</span></button></div>
+          </section>
+
+          <section class="module control-module">
+            <div class="module-head"><span class="module-index">02</span><span>CONTROL PANEL</span><span class="module-rule"></span><span class="hot-tag">ARMED</span></div>
+            <div class="action-row"><button class="action-btn start" id="startBtn"><span>▶</span> START</button><button class="action-btn stop" id="stopBtn"><span>■</span> STOP</button></div>
+            <button class="estop-btn" id="estopBtn"><span class="estop-ring">!</span><span><b id="estopLabel">EMERGENCY STOP</b><small>HARDWARE SAFETY OVERRIDE</small></span><span class="estop-arrow">↗</span></button>
+            <div class="control-row"><div><span class="label">DIRECTION COMMAND</span><div class="d-pad"><button data-key="up">▲</button><button data-key="left">◀</button><button data-key="stop">●</button><button data-key="right">▶</button><button data-key="down">▼</button></div></div><div class="command-readout"><span class="label">LAST CMD</span><b id="lastCommand">AUTO / FORWARD</b><small>keyboard ready · WASD / arrows</small></div></div>
+            <div class="slider-wrap"><div class="label-row"><span>VELOCITY LIMIT</span><b><span id="speedValue">42</span><small>%</small></b></div><input id="speedSlider" type="range" min="0" max="100" value="42" /><div class="slider-scale"><span>0.0</span><span>0.5</span><span>1.0 m/s</span></div></div>
+            <div class="mode-toggle"><span class="label">CONTROL AUTHORITY</span><div class="toggle-buttons"><button data-mode="AUTO" class="mode-btn active">AUTO</button><button data-mode="MANUAL" class="mode-btn">MANUAL</button></div></div>
+          </section>
+
+          <section class="module comm-module">
+            <div class="module-head"><span class="module-index">03</span><span>COMMUNICATION</span><span class="module-rule"></span><span class="tiny-status live">ROS2</span></div>
+            <div class="comm-grid"><div class="comm-cell"><span class="link-dot green"></span><div><span>ROS2 TOPIC</span><b>CONNECTED</b></div></div><div class="comm-cell"><span class="link-dot green"></span><div><span>TCP LINK</span><b>CONNECTED</b></div></div><div class="comm-cell"><span class="link-dot green"></span><div><span>SERIAL</span><b>READY</b></div></div><div class="comm-cell"><span class="link-dot amber"></span><div><span>PACKETS</span><b id="packetLoss">0.12% LOSS</b></div></div></div>
+            <div class="latency-head"><span>PACKET LATENCY</span><b><span id="latencyValue">23</span> <small>ms</small></b></div><div class="latency-bars" id="latencyBars"></div><div class="chart-scale"><span>−60s</span><span>NOW</span></div>
+          </section>
+
+          <section class="module sensor-module">
+            <div class="module-head"><span class="module-index">04</span><span>SENSOR DATA</span><span class="module-rule"></span><span class="tiny-status live">STREAM</span></div>
+            <div class="sensor-head"><div><span class="label">FORCE MONITORING</span><b><span id="forceValue">18.4</span> <small>N</small></b></div><div class="force-ring"><span id="forceRing"></span><b id="forcePercent">18%</b></div></div><svg class="sensor-chart" viewBox="0 0 280 46" preserveAspectRatio="none"><polyline id="forceTrace" fill="none" stroke="#ff7a1a" stroke-width="2" points="0,31 16,26 32,29 48,19 64,23 80,16 96,21 112,14 128,18 144,13 160,23 176,18 192,21 208,17 224,25 240,22 256,27 280,20"></polyline></svg>
+            <div class="sensor-grid"><div class="sensor-reading"><span class="sensor-icon">◎</span><div><span>COLLISION</span><b class="clear-text" id="collisionValue">CLEAR</b></div></div><div class="sensor-reading"><span class="sensor-icon">⌁</span><div><span>FRONT DIST.</span><b><span id="distanceValue">1.84</span> <small>m</small></b></div></div></div>
+          </section>
+
+          <section class="module safety-module">
+            <div class="module-head"><span class="module-index">05</span><span>SAFETY LAYER</span><span class="module-rule"></span><span class="hot-tag">PRIORITY</span></div>
+            <div class="safety-banner safe" id="safetyBanner"><span class="safety-symbol">✓</span><div><b id="safetyTitle">ALL SYSTEMS NOMINAL</b><small id="safetyDetail">Emergency stop circuit is armed</small></div></div>
+            <div class="safety-list"><div><span>EMERGENCY STOP</span><b class="safe-text" id="safetyEstop">ARMED / READY</b></div><div><span>SPEED LIMIT</span><b class="safe-text" id="speedLimitValue">WITHIN LIMIT</b></div><div><span>SYSTEM FAULT</span><b id="faultValue">0 ACTIVE</b></div></div>
+          </section>
+
+          <section class="module history-module">
+            <div class="module-head"><span class="module-index">06</span><span>DEBUG / HISTORY</span><span class="module-rule"></span><span class="tiny-status">LOCAL</span></div>
+            <div class="filter-row"><button class="filter-btn active" data-filter="ALL">ALL</button><button class="filter-btn" data-filter="INFO">INFO</button><button class="filter-btn" data-filter="WARN">WARN</button><button class="filter-btn" data-filter="ERROR">ERROR</button></div>
+            <div class="history-list" id="historyList"></div>
+          </section>
+        </aside>
+
+        <section class="operations-stage">
+          <div class="stage-heading"><div><div class="eyebrow orange">RIGHT VIEWPORT · SIMULATION</div><h2>LIVE OPERATION <span>//</span> M0609</h2></div><div class="stage-actions"><span class="stage-state"><i></i><b id="stageState">RUNNING</b></span><button class="icon-btn" title="Refresh telemetry" id="refreshBtn">↻</button><button class="icon-btn" title="Fullscreen simulation" id="focusBtn">⛶</button></div></div>
+          <div class="simulation-card" id="simulationCard">
+            <div class="sim-topline"><div class="sim-title"><span class="sim-live-dot"></span><span>ROBOT MOTION SIMULATION</span><small>ROS2 /cmd_vel · 10 Hz</small></div><div class="mission-id"><span>MISSION</span><b>MT-2481</b><span class="sep">|</span><span>ETA</span><b id="etaValue">00:42</b></div></div>
+            <div class="sim-content"><div class="sim-map" id="simMap"><div class="map-corner tl">ZONE B / NORTH</div><div class="map-corner br">X 04.218 · Y 12.880</div><div class="map-grid"></div><div class="route-line"></div><div class="waypoint start"><span></span><b>A</b></div><div class="waypoint end"><span></span><b>B</b></div><div class="obstacle obstacle-one"><span>PALLET</span></div><div class="obstacle obstacle-two"><span>RACK 02</span></div><div class="scan-ring ring-one"></div><div class="scan-ring ring-two"></div><div class="robot" id="robot"><div class="robot-sensor"></div><div class="robot-body"><span></span><i></i><b>M06</b></div><div class="robot-direction"></div></div><div class="robot-label"><b>M0609</b><span id="robotMotion">MOVING · AUTO</span></div><div class="map-readout"><span>HEADING</span><b id="headingValue">082°</b><span>BATTERY</span><b>87%</b><div class="battery"><i></i></div></div></div><div class="sim-side"><div class="telemetry-block"><span class="label">POSITION</span><div class="position-values"><div><b id="posX">04.218</b><small>X / M</small></div><div><b id="posY">12.880</b><small>Y / M</small></div></div></div><div class="telemetry-block"><span class="label">ACTIVE COMMAND</span><div class="command-card"><span id="activeCommandIcon">↑</span><div><b id="activeCommand">NAVIGATE TO B</b><small>priority: normal</small></div></div></div><div class="telemetry-block"><span class="label">QUEUE</span><div class="queue-row"><span class="queue-count">03</span><div><b>COMMANDS PENDING</b><small>last update 00:03 ago</small></div></div><div class="queue-track"><i></i><i></i><i></i><i></i></div></div><div class="telemetry-foot"><span>SIMULATION MODE</span><b>SAFE TO TEST</b></div></div></div>
+            <div class="sim-footer"><div class="footer-stat"><span class="mini-signal"></span><span>LOCAL CLOCK SYNC</span><b>±0.4 ms</b></div><div class="footer-stat"><span class="mini-signal orange"></span><span>ODOMETRY STREAM</span><b>10 Hz</b></div><div class="footer-stat"><span class="mini-signal green"></span><span>SAFETY CONTROLLER</span><b>READY</b></div><div class="sim-hint">KEYBOARD CONTROL <b>W A S D</b> / ARROWS</div></div>
+          </div>
+
+          <div class="event-console">
+            <div class="console-head"><div><div class="eyebrow orange">EVENT BUS · LIVE FEED</div><h3>REAL-TIME LOG <span id="logCount">08</span></h3></div><div class="console-tools"><button class="console-filter active" data-filter="ALL">ALL</button><button class="console-filter" data-filter="INFO">INFO</button><button class="console-filter" data-filter="WARN">WARN</button><button class="console-filter" data-filter="ERROR">ERROR</button><span class="console-divider"></span><span class="auto-scroll"><i></i> AUTO-SCROLL</span></div></div>
+            <div class="console-table-head"><span>TIME</span><span>TYPE</span><span>SOURCE</span><span>MESSAGE</span><span>STATE</span></div><div class="console-log" id="consoleLog"></div><div class="console-footer"><span><i class="green"></i> stream connected</span><span>showing <b id="visibleCount">08</b> of <b id="totalCount">08</b> events</span></div>
+          </div>
+        </section>
+      </main>
+      <footer class="app-footer"><span>M0609 ROS2 COMMAND CENTER <b>·</b> INDUSTRIAL CONTROL PROTOTYPE</span><span>LOCAL SIMULATION ONLY <b>·</b> NO HARDWARE CONNECTION</span><span>BUILD 2026.11.16 <b>·</b> SECURE SESSION</span></footer>
+    </div>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>

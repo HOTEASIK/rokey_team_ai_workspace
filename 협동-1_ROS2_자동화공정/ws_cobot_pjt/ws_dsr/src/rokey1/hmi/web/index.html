@@ -1,0 +1,185 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#242629" />
+    <title>M0609 · ROKEY1 통합 제어</title>
+    <link rel="stylesheet" href="styles.css" />
+    <link rel="stylesheet" href="hmi.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="topbar">
+        <div class="brand-block">
+          <div class="brand-mark"><span></span><span></span><span></span></div>
+          <div>
+            <div class="eyebrow">ROKEY1 · 벽면 탐색 / 퍼티 / 샌딩</div>
+            <div class="brand-name">M0609 <b>/</b> ROS2 통합 제어 화면</div>
+          </div>
+        </div>
+        <div class="topbar-actions">
+          <div class="bridge-chip" id="bridgeChip"><span class="pulse-dot"></span> <span id="bridgeText">연결 중…</span></div>
+          <div class="top-clock"><span id="topClock">--:--:--</span><small id="topDate">KST</small></div>
+          <div class="operator-chip"><span class="operator-avatar">작업</span><span><b>작업자</b><small id="robotIdChip">dsr01 · m0609</small></span></div>
+        </div>
+      </header>
+
+      <main class="workspace">
+        <aside class="control-rail">
+          <div class="rail-header">
+            <div>
+              <div class="eyebrow orange" id="railStatus">HMI 서버 · 연결 끊김</div>
+              <h1>작업<br />제어판</h1>
+            </div>
+            <div class="rail-meta"><b>M0609</b><span>rokey1</span></div>
+          </div>
+
+          <!-- 01 상태 -->
+          <section class="module state-module">
+            <div class="module-head"><span class="module-index">01</span><span>현재 상태</span><span class="module-rule"></span><span class="tiny-status live">실시간</span></div>
+            <div class="state-hero">
+              <div><span class="label">현재 작업</span><strong id="taskName">작업 없음</strong><span class="muted" id="taskSub">대기 중</span></div>
+              <div class="status-stamp" id="statusStamp"><i></i><b id="statusText">대기</b></div>
+            </div>
+            <div class="progress-row">
+              <div class="label-row"><span id="progressLabel">작업 진행률</span><b id="progressValue">--</b></div>
+              <div class="progress-track" id="progressTrack"><span id="progressBar" style="width:0%"></span><i style="left:0%"></i></div>
+            </div>
+            <div class="metric-grid">
+              <div class="metric"><span>경과 시간</span><b><em id="elapsedValue">0.0</em> <small>초</small></b></div>
+              <div class="metric"><span>툴 힘 |F|</span><b><em id="forceMetric">--</em> <small>N</small></b></div>
+            </div>
+            <div class="mode-line"><span class="label">로봇 상태</span><div class="mode-value" id="robotStateValue"><span></span>알 수 없음</div></div>
+            <div class="device-list">
+              <div class="label">ROS2 연결</div>
+              <div class="device-row" data-link="controller"><span class="led"></span><b>두산 컨트롤러</b><small>끊김</small><span class="link-icon">/dsr01</span></div>
+              <div class="device-row" data-link="gripper"><span class="led"></span><b>RG2 그리퍼</b><small>끊김</small><span class="link-icon">/onrobot</span></div>
+              <div class="device-row" data-link="tool_task"><span class="led"></span><b>샌딩 액션 서버</b><small>끊김</small><span class="link-icon">tool_task</span></div>
+            </div>
+          </section>
+
+          <!-- 02 작업 실행 -->
+          <section class="module control-module">
+            <div class="module-head"><span class="module-index">02</span><span>작업 실행</span><span class="module-rule"></span><span class="hot-tag" id="armedTag">준비</span></div>
+            <div class="task-tabs" id="groupTabs">
+              <button class="task-tab active" data-group="navigation">벽면 탐색</button>
+              <button class="task-tab" data-group="putty">퍼티</button>
+              <button class="task-tab" data-group="sanding">샌딩</button>
+            </div>
+            <div class="task-list" id="taskList"></div>
+            <p class="task-desc" id="taskDesc"></p>
+            <div class="param-grid" id="paramGrid"></div>
+            <div class="mode-toggle">
+              <span class="label">실행 모드</span>
+              <div class="toggle-buttons"><button data-mode="virtual" class="mode-btn active">가상</button><button data-mode="real" class="mode-btn">실제 로봇</button></div>
+            </div>
+            <div class="real-warning" id="realWarning" hidden>실제 로봇 모드 · 로봇이 실제로 움직입니다. 주변을 확인하세요.</div>
+            <div class="action-row"><button class="action-btn start" id="startBtn"><span>▶</span> 시작</button><button class="action-btn stop" id="stopBtn"><span>■</span> 전체 정지</button></div>
+            <button class="estop-btn" id="estopBtn"><span class="estop-ring">!</span><span><b id="estopLabel">비상 정지</b><small>소프트웨어 정지 · 모션 정지 + 노드 종료 (Esc)</small></span><span class="estop-arrow">↗</span></button>
+            <div class="control-row"><div class="command-readout"><span class="label">마지막 명령</span><b id="lastCommand">—</b><small id="lastCommandSub">작업을 고르고 시작을 누르세요</small></div></div>
+          </section>
+
+          <!-- 03 통신 -->
+          <section class="module comm-module">
+            <div class="module-head"><span class="module-index">03</span><span>통신 상태</span><span class="module-rule"></span><span class="tiny-status live">ROS2</span></div>
+            <div class="comm-grid">
+              <div class="comm-cell"><span class="link-dot" id="dotBridge"></span><div><span>화면 ↔ 서버</span><b id="commBridge">끊김</b></div></div>
+              <div class="comm-cell"><span class="link-dot" id="dotDsr"></span><div><span>두산 서비스</span><b id="commDsr">끊김</b></div></div>
+              <div class="comm-cell"><span class="link-dot" id="dotJoint"></span><div><span>/joint_states</span><b id="commJoint">0.0 Hz</b></div></div>
+              <div class="comm-cell"><span class="link-dot" id="dotTelemetry"></span><div><span>로봇 데이터</span><b id="commTelemetry">수신 없음</b></div></div>
+            </div>
+            <div class="latency-head"><span>서버 응답 시간</span><b><span id="latencyValue">--</span> <small>ms</small></b></div>
+            <div class="latency-bars" id="latencyBars"></div>
+            <div class="chart-scale"><span>50초 전</span><span>현재</span></div>
+          </section>
+
+          <!-- 04 힘 센서 -->
+          <section class="module sensor-module">
+            <div class="module-head"><span class="module-index">04</span><span>툴 힘 센서</span><span class="module-rule"></span><span class="tiny-status live">BASE 기준</span></div>
+            <div class="sensor-head">
+              <div><span class="label">힘 크기</span><b><span id="forceValue">--</span> <small>N</small></b></div>
+              <div class="force-ring"><span id="forceRing"></span><b id="forcePercent">--</b></div>
+            </div>
+            <svg class="sensor-chart" viewBox="0 0 280 46" preserveAspectRatio="none"><polyline id="forceTrace" fill="none" stroke="#ff7a1a" stroke-width="2" points=""></polyline></svg>
+            <div class="sensor-grid force-axes">
+              <div class="sensor-reading"><span class="sensor-icon">X</span><div><span>Fx</span><b id="fx">--</b></div></div>
+              <div class="sensor-reading"><span class="sensor-icon">Y</span><div><span>Fy</span><b id="fy">--</b></div></div>
+              <div class="sensor-reading"><span class="sensor-icon">Z</span><div><span>Fz</span><b id="fz">--</b></div></div>
+            </div>
+          </section>
+
+          <!-- 05 안전 -->
+          <section class="module safety-module">
+            <div class="module-head"><span class="module-index">05</span><span>안전 상태</span><span class="module-rule"></span><span class="hot-tag">최우선</span></div>
+            <div class="safety-banner safe" id="safetyBanner"><span class="safety-symbol">✓</span><div><b id="safetyTitle">모든 시스템 정상</b><small id="safetyDetail">비상 정지 대기 중</small></div></div>
+            <div class="safety-list">
+              <div><span>소프트웨어 비상 정지</span><b class="safe-text" id="safetyEstop">대기 / 정상</b></div>
+              <div><span>컨트롤러 상태</span><b class="safe-text" id="safetyRobot">알 수 없음</b></div>
+              <div><span>오류 로그</span><b id="faultValue">0건</b></div>
+            </div>
+          </section>
+
+          <!-- 06 실행 기록 -->
+          <section class="module history-module">
+            <div class="module-head"><span class="module-index">06</span><span>실행 기록</span><span class="module-rule"></span><span class="tiny-status">최근 8건</span></div>
+            <div class="run-list" id="runList"></div>
+          </section>
+        </aside>
+
+        <section class="operations-stage">
+          <div class="stage-heading">
+            <div><div class="eyebrow orange">실시간 로봇 데이터</div><h2>실시간 작업 현황 <span>//</span> M0609</h2></div>
+            <div class="stage-actions"><span class="stage-state"><i></i><b id="stageState">대기</b></span><button class="icon-btn" title="로그 지우기" id="clearBtn">⌫</button><button class="icon-btn" title="화면 확대" id="focusBtn">⛶</button></div>
+          </div>
+
+          <div class="simulation-card" id="simulationCard">
+            <div class="sim-topline">
+              <div class="sim-title"><span class="sim-live-dot"></span><span>TCP 작업 공간</span><small>get_current_posx · BASE 기준 · mm</small></div>
+              <div class="mission-id"><span>실행</span><b id="runIdValue">—</b><span class="sep">|</span><span>단계</span><b id="stageValue">—</b></div>
+            </div>
+            <div class="sim-content">
+              <div class="viz-grid">
+                <div class="viz-panel"><div class="map-corner tl">위에서 본 모습 · X / Y</div><svg id="topView" viewBox="-1000 -1000 2000 2000" preserveAspectRatio="xMidYMid meet"></svg></div>
+                <div class="viz-panel"><div class="map-corner tl">옆에서 본 모습 · X / Z</div><svg id="sideView" viewBox="-1000 -1300 2000 1600" preserveAspectRatio="xMidYMid meet"></svg></div>
+              </div>
+              <div class="sim-side">
+                <div class="telemetry-block"><span class="label">위치 (mm)</span><div class="position-values three"><div><b id="posX">--</b><small>X</small></div><div><b id="posY">--</b><small>Y</small></div><div><b id="posZ">--</b><small>Z</small></div></div></div>
+                <div class="telemetry-block"><span class="label">자세 (deg)</span><div class="position-values three"><div><b id="rotA">--</b><small>A</small></div><div><b id="rotB">--</b><small>B</small></div><div><b id="rotC">--</b><small>C</small></div></div></div>
+                <div class="telemetry-block"><span class="label">관절 각도 (deg)</span><div class="joint-list" id="jointList"></div></div>
+                <div class="telemetry-foot"><span>실행 모드</span><b id="modeFoot">가상</b></div>
+              </div>
+            </div>
+            <div class="sim-footer">
+              <div class="footer-stat"><span class="mini-signal"></span><span>실행 중 작업</span><b id="activeCount">0</b></div>
+              <div class="footer-stat"><span class="mini-signal orange"></span><span>관절 데이터</span><b id="jointHzFoot">0 Hz</b></div>
+              <div class="footer-stat"><span class="mini-signal green"></span><span>안전</span><b id="safetyFoot">정상</b></div>
+              <div class="sim-hint">비상 정지 <b>Esc</b></div>
+            </div>
+          </div>
+
+          <div class="event-console">
+            <div class="console-head">
+              <div><div class="eyebrow orange">노드 출력 · 실시간</div><h3>실시간 로그 <span id="logCount">00</span></h3></div>
+              <div class="console-tools"><button class="console-filter active" data-filter="ALL">전체</button><button class="console-filter" data-filter="INFO">정보</button><button class="console-filter" data-filter="WARN">경고</button><button class="console-filter" data-filter="ERROR">오류</button><span class="console-divider"></span><label class="auto-scroll"><input type="checkbox" id="autoScroll" checked /> 자동 스크롤</label></div>
+            </div>
+            <div class="console-table-head"><span>시간</span><span>종류</span><span>출처</span><span>내용</span><span>상태</span></div>
+            <div class="console-log" id="consoleLog"></div>
+            <form class="stdin-bar" id="stdinForm">
+              <span class="stdin-label" id="stdinLabel">노드 입력</span>
+              <select id="stdinRun"></select>
+              <input id="stdinText" autocomplete="off" placeholder="노드가 질문하면 여기서 답하세요 (예: y)" />
+              <button type="button" class="console-filter" data-quick="y">y</button>
+              <button type="button" class="console-filter" data-quick="">Enter</button>
+              <button type="submit" class="console-filter active">보내기</button>
+            </form>
+            <div class="console-footer"><span><i class="green" id="streamDot"></i> <span id="streamText">연결 중</span></span><span>전체 <b id="totalCount">0</b>건 중 <b id="visibleCount">0</b>건 표시</span></div>
+          </div>
+        </section>
+      </main>
+      <footer class="app-footer"><span>M0609 ROS2 통합 제어 <b>·</b> rokey1 hmi_server</span><span>소프트웨어 비상 정지는 하드웨어 비상정지 버튼을 대신하지 않습니다</span><span id="footerHost">—</span></footer>
+    </div>
+    <div class="toast" id="toast" hidden></div>
+    <script type="module" src="main.js"></script>
+  </body>
+</html>
