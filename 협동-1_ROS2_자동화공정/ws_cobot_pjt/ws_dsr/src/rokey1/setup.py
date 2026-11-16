@@ -30,6 +30,7 @@ setup(
         'console_scripts': [
             'move = rokey1.move:main',
             'grip_test = rokey1.grip_test:main',
+            'homeset = rokey1.homeset:main',
             # ===== HMI =====
             'hmi_server = hmi.hmi_server:main',
             # ===== navigation =====

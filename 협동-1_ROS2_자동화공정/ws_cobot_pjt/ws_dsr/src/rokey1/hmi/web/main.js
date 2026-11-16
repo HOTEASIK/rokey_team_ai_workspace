@@ -34,7 +34,13 @@ const ui = {
   forceHist: [],
   trail: [],
   lastRunsKey: '',
+  layout: 'stack',     // stack(위·아래) | split(좌·우)
+  page: 'control',     // control(작업 제어판) | monitor(실시간 작업 현황)
+  speed: { pct: 100, unlocked: false, max: 100, min: 10, default: 100 },
+  speedDragging: false,
+  alertOn: true,
 };
+const MAX_ALERTS = 4;
 
 // ------------------------------------------------------------------ API
 async function api(path, body) {
@@ -67,10 +73,14 @@ function renderTaskList() {
   renderParams();
 }
 
+const fmtDefault = (p) => (p.type === 'bool' ? (p.default ? '켬' : '끔') : p.default === '' ? '(비움 = 자동)' : String(p.default));
+const isDefault = (p, v) => (p.type === 'bool' ? Boolean(v) === Boolean(p.default) : p.type === 'number' ? Number(v) === Number(p.default) : String(v) === String(p.default));
+
 function renderParams() {
   const task = currentTask();
   $('taskDesc').textContent = task ? task.desc : '';
-  if (!task) { $('paramGrid').innerHTML = ''; return; }
+  $('resetParamsBtn').hidden = !task || !task.params.length;
+  if (!task) { $('paramGrid').innerHTML = ''; $('paramChanged').textContent = ''; return; }
   const vals = (ui.values[task.id] ||= {});
   $('paramGrid').innerHTML = task.params.map((p) => {
     const v = vals[p.key] ?? p.default;
@@ -78,14 +88,39 @@ function renderParams() {
     let input;
     if (p.type === 'select') input = `<select id="${id}" data-key="${p.key}">${p.options.map((o) => `<option ${String(o) === String(v) ? 'selected' : ''}>${esc(o)}</option>`).join('')}</select>`;
     else if (p.type === 'bool') input = `<label class="switch"><input type="checkbox" id="${id}" data-key="${p.key}" ${v ? 'checked' : ''}/><span></span></label>`;
-    else input = `<input id="${id}" data-key="${p.key}" type="${p.type === 'number' ? 'number' : 'text'}" step="any" value="${esc(v)}" />`;
+    else input = `<input id="${id}" data-key="${p.key}" type="${p.type === 'number' ? 'number' : 'text'}" step="any" value="${esc(v)}" placeholder="${esc(p.default)}" />`;
     const wide = p.type === 'text' ? ' wide' : '';
-    return `<label class="param-field${wide} ${p.type}" title="${esc(p.help || '')}"><span>${esc(p.label)}</span>${input}</label>`;
-  }).join('') || '<div class="param-empty">설정할 파라미터 없음</div>';
+    const changed = isDefault(p, v) ? '' : ' changed';
+    const help = `${p.help ? `${esc(p.help)} · ` : ''}<em>기본 ${esc(fmtDefault(p))}</em>${p.scale ? ' · <em class="scale-tag">속도% 적용</em>' : ''}`;
+    const head = `<span class="pf-label">${esc(p.label)}</span>`;
+    const body = p.type === 'bool' ? `<div class="pf-row">${head}${input}</div>` : `${head}${input}`;
+    return `<label class="param-field${wide} ${p.type}${changed}" data-field="${p.key}">${body}<small class="pf-help">${help}</small></label>`;
+  }).join('') || '<div class="param-empty">설정할 파라미터 없음 · 바로 시작할 수 있습니다</div>';
+  const update = () => {
+    let n = 0;
+    task.params.forEach((p) => {
+      const d = isDefault(p, vals[p.key] ?? p.default);
+      if (!d) n += 1;
+      $('paramGrid').querySelector(`[data-field="${p.key}"]`)?.classList.toggle('changed', !d);
+    });
+    $('paramChanged').textContent = n ? `기본값에서 ${n}개 변경됨` : '모두 기본값';
+    $('paramChanged').classList.toggle('changed', n > 0);
+  };
   $('paramGrid').querySelectorAll('[data-key]').forEach((el) => el.addEventListener('change', () => {
     vals[el.dataset.key] = el.type === 'checkbox' ? el.checked : el.value;
     saveUi();
+    update();
   }));
+  update();
+}
+
+function resetParams() {
+  const task = currentTask();
+  if (!task) return;
+  ui.values[task.id] = {};
+  saveUi();
+  renderParams();
+  toast(`${task.label} · 입력값을 기본값으로 되돌렸습니다.`, 'info');
 }
 
 function collectParams() {
@@ -108,7 +143,7 @@ function setMode(mode) {
 }
 
 function saveUi() {
-  try { localStorage.setItem('rokey1-hmi', JSON.stringify({ group: ui.group, taskId: ui.taskId, mode: ui.mode, values: ui.values })); } catch (e) { /* ignore */ }
+  try { localStorage.setItem('rokey1-hmi', JSON.stringify({ group: ui.group, taskId: ui.taskId, mode: ui.mode, values: ui.values, layout: ui.layout, alertOn: ui.alertOn, page: ui.page })); } catch (e) { /* ignore */ }
 }
 function loadUi() {
   try { Object.assign(ui, JSON.parse(localStorage.getItem('rokey1-hmi')) || {}); } catch (e) { /* ignore */ }
@@ -124,6 +159,55 @@ async function startTask() {
     $('lastCommand').textContent = `${task.label} / ${MODE_KO[ui.mode]}`;
     $('lastCommandSub').textContent = `실행 #${run.run_id} 시작`;
   } catch (e) { toast(e.message); }
+}
+
+async function goHome() {
+  if (ui.state?.estop) { toast('비상 정지 상태입니다. 해제 후 홈 이동하세요.'); return; }
+  const where = ui.mode === 'real' ? '[실제 로봇]' : '[가상]';
+  if (!confirm(`${where} 관절 홈 자세 (0, 0, 90, 0, 90, 0) 로 이동합니다.\n속도 ${ui.speed.pct}% · 주변이 안전한지 확인했습니까?`)) return;
+  try {
+    const { run } = await api('/api/start', { task_id: 'homeset', mode: ui.mode, params: {} });
+    $('lastCommand').textContent = `홈 위치로 이동 / ${MODE_KO[ui.mode]}`;
+    $('lastCommandSub').textContent = `실행 #${run.run_id} 시작`;
+  } catch (e) { toast(e.message); }
+}
+
+// ------------------------------------------------------------------ 속도
+function renderSpeed(sp) {
+  if (!sp) return;
+  ui.speed = sp;
+  const range = $('speedRange');
+  range.max = String(sp.max);
+  range.min = String(sp.min);
+  if (!ui.speedDragging) range.value = String(sp.pct);
+  const shown = ui.speedDragging ? Number(range.value) : sp.pct;
+  $('speedValue').textContent = shown;
+  $('monSpeed').textContent = sp.pct;
+  $('monSpeed').parentElement.classList.toggle('error-text', sp.pct > 100);
+  $('speedMax').textContent = `${sp.max}%`;
+  $('speedMid').textContent = `${Math.round((sp.min + sp.max) / 2)}%`;
+  const over = shown > 100;
+  $('speedBlock').classList.toggle('unlocked', sp.unlocked);
+  $('speedBlock').classList.toggle('over', over);
+  $('speedWarning').hidden = !sp.unlocked;
+  $('speedUnlockBtn').textContent = sp.unlocked ? '🔓 안전 잠금' : '🔒 안전 해제';
+  $('speedUnlockBtn').classList.toggle('active', sp.unlocked);
+  const pct = ((shown - sp.min) / (sp.max - sp.min)) * 100;
+  range.style.setProperty('--fill', `${pct}%`);
+}
+
+async function setSpeed(pct, unlocked = ui.speed.unlocked) {
+  try {
+    const { speed } = await api('/api/speed', { pct, unlocked });
+    renderSpeed(speed);
+  } catch (e) { toast(e.message); renderSpeed(ui.speed); }
+}
+
+async function toggleSpeedLock() {
+  if (ui.speed.unlocked) { await setSpeed(Math.min(ui.speed.pct, 100), false); return; }
+  if (ui.state?.estop) { toast('비상 정지 상태에서는 안전 해제를 할 수 없습니다.'); return; }
+  if (!confirm('속도 안전 해제\n\n100% 를 넘는 속도(최대 200%)를 허용합니다.\n충돌 시 피해가 커질 수 있습니다. 주변에 사람이 없고 경로가 검증되었습니까?')) return;
+  await setSpeed(ui.speed.pct, true);
 }
 
 async function stopRun(runId) {
@@ -148,8 +232,69 @@ async function sendStdin(text) {
   try { await api('/api/stdin', { run_id: runId, text }); $('stdinText').value = ''; } catch (e) { toast(e.message); }
 }
 
+// ------------------------------------------------------------------ 경고/오류 팝업 (로그 원문 그대로)
+function showAlert(l) {
+  if (!ui.alertOn) return;
+  const list = $('alertList');
+  const raw = l.raw || l.message;
+  const key = `${l.type}|${l.source}|${raw}`;
+  const same = [...list.children].find((c) => c.dataset.key === key);
+  if (same) {
+    const n = Number(same.dataset.count) + 1;
+    same.dataset.count = n;
+    same.querySelector('.alert-count').textContent = `×${n}`;
+    same.querySelector('time').textContent = fmtTime(l.t);
+    return;
+  }
+  const el = document.createElement('div');
+  const kind = l.type === 'ERROR' ? 'error' : 'warn';
+  const close = () => { el.remove(); renderAlertBar(); };
+  el.className = `alert-pop ${kind}`;
+  el.dataset.key = key;
+  el.dataset.count = 1;
+  el.innerHTML = `<div class="alert-head"><span class="alert-icon">${kind === 'error' ? '✕' : '!'}</span><b>${esc(ko(TYPE_KO, l.type))}</b><span class="alert-src">${esc(l.source)}${l.run_id ? ` · 실행 #${l.run_id}` : ''}</span><span class="alert-count"></span><time>${fmtTime(l.t)}</time><button class="alert-close" title="닫기">✕</button></div><pre class="alert-raw">${esc(raw)}</pre><div class="alert-foot"><span>${kind === 'warn' ? '12초 뒤 자동으로 닫힘' : '확인 후 직접 닫아 주세요'}</span><button class="alert-copy">복사</button><button class="alert-log">로그에서 보기</button></div>`;
+  el.querySelector('.alert-close').addEventListener('click', close);
+  el.querySelector('.alert-copy').addEventListener('click', () => { navigator.clipboard?.writeText(raw).then(() => toast('로그를 복사했습니다.', 'info')).catch(() => {}); });
+  el.querySelector('.alert-log').addEventListener('click', () => { setFilter(l.type); close(); setPage('monitor'); $('consoleLog').scrollIntoView({ behavior: 'smooth', block: 'center' }); });
+  list.prepend(el);
+  while (list.children.length > MAX_ALERTS) list.lastElementChild.remove();
+  // 경고는 12초 뒤 자동으로 닫힘, 오류는 직접 닫을 때까지 유지
+  if (kind === 'warn') setTimeout(close, 12000);
+  renderAlertBar();
+}
+
+function renderAlertBar() {
+  $('alertClear').hidden = $('alertList').children.length < 2;
+}
+
+function clearAlerts() {
+  $('alertList').innerHTML = '';
+  renderAlertBar();
+}
+
+// ------------------------------------------------------------------ 페이지 (작업 제어판 / 실시간 작업 현황)
+const PAGES = ['control', 'monitor'];
+function setPage(page, push = true) {
+  ui.page = PAGES.includes(page) ? page : 'control';
+  $('workspace').dataset.page = ui.page;
+  document.querySelectorAll('.page-tab').forEach((b) => b.classList.toggle('active', b.dataset.page === ui.page));
+  if (push && location.hash !== `#${ui.page}`) history.replaceState(null, '', `#${ui.page}`);
+  if (ui.page === 'monitor') { const box = $('consoleLog'); if ($('autoScroll').checked) box.scrollTop = box.scrollHeight; }
+  window.scrollTo(0, 0);
+  saveUi();
+}
+
+// ------------------------------------------------------------------ 화면 배치
+function setLayout(layout) {
+  ui.layout = layout === 'split' ? 'split' : 'stack';
+  $('operationsStage').classList.toggle('layout-split', ui.layout === 'split');
+  document.querySelectorAll('.layout-btn').forEach((b) => b.classList.toggle('active', b.dataset.layout === ui.layout));
+  saveUi();
+}
+
 // ------------------------------------------------------------------ 로그
-function addLogs(entries) {
+function addLogs(entries, live = false) {
+  if (live) entries.forEach((l) => { if (l.popup) showAlert(l); });
   entries.forEach((l) => { if (l.type === 'ERROR') ui.faults += 1; });
   ui.logs.push(...entries);
   if (ui.logs.length > MAX_LOGS) ui.logs.splice(0, ui.logs.length - MAX_LOGS);
@@ -229,6 +374,22 @@ function renderState(s) {
   $('progressBar').style.width = `${pct ?? 0}%`;
   $('progressBar').nextElementSibling.style.left = `${pct ?? 0}%`;
 
+  // --- 실시간 작업 현황 상단 바
+  $('monStatus').textContent = STATUS_KO[status];
+  $('monDot').style.background = color;
+  $('monDot').style.boxShadow = `0 0 8px ${color}`;
+  $('monitorStrip').classList.toggle('alert', alert);
+  $('monTask').textContent = $('taskName').textContent;
+  $('monSub').textContent = $('taskSub').textContent;
+  $('monElapsed').textContent = $('elapsedValue').textContent;
+  $('monProgressLabel').textContent = $('progressLabel').textContent;
+  $('monProgressValue').textContent = $('progressValue').textContent;
+  $('monProgressTrack').classList.toggle('indeterminate', track.classList.contains('indeterminate'));
+  $('monProgressBar').style.width = `${pct ?? 0}%`;
+  $('monProgressBar').nextElementSibling.style.left = `${pct ?? 0}%`;
+  $('monitorBadge').hidden = !active.length;
+  $('monitorBadge').textContent = active.length;
+
   // --- 로봇 상태 / 링크
   $('robotStateValue').innerHTML = `<span></span>${esc(robotKo(robot.state_name))}`;
   $('robotStateValue').classList.toggle('bad', badRobot);
@@ -253,6 +414,7 @@ function renderState(s) {
     const mag = Math.hypot(f[0], f[1], f[2]);
     $('forceValue').textContent = mag.toFixed(1);
     $('forceMetric').textContent = mag.toFixed(1);
+    $('monForce').textContent = mag.toFixed(1);
     $('forcePercent').textContent = `${Math.min(999, Math.round(mag))}`;
     $('forceRing').style.transform = `rotate(${Math.min(280, mag * 4)}deg)`;
     ['fx', 'fy', 'fz'].forEach((k, i) => { $(k).textContent = `${f[i].toFixed(1)} N`; });
@@ -271,24 +433,29 @@ function renderState(s) {
       if (ui.trail.length > 400) ui.trail.shift();
     }
   }
-  drawViews(p);
+  drawArm(robot.joints, p);
   renderJoints(robot.joints);
 
   // --- 안전
   const banner = $('safetyBanner');
   banner.className = `safety-banner ${s.estop || badRobot ? 'alert' : 'safe'}`;
   banner.querySelector('.safety-symbol').textContent = s.estop || badRobot ? '!' : '✓';
-  $('safetyTitle').textContent = s.estop ? '비상 정지 작동 중' : badRobot ? `컨트롤러 ${robotKo(robot.state_name)}` : '모든 시스템 정상';
-  $('safetyDetail').textContent = s.estop ? '작업 시작 금지 · 확인 후 비상 정지 해제' : badRobot ? '티칭 펜던트에서 상태 확인/해제 필요' : '비상 정지 대기 중';
-  $('safetyEstop').textContent = s.estop ? '작동 / 정지됨' : '대기 / 정상';
+  $('safetyTitle').textContent = s.estop ? '비상 정지 작동 중' : badRobot ? `컨트롤러 ${robotKo(robot.state_name)}` : '이상 없음';
+  $('safetyDetail').textContent = s.estop ? '주변 확인 후 비상 정지를 해제하세요. 해제 전에는 작업을 시작할 수 없습니다.' : badRobot ? '티칭 펜던트에서 상태를 확인하고 해제하세요.' : '비상 정지 버튼 사용 가능';
+  $('safetyEstop').textContent = s.estop ? '작동 중' : '해제됨';
   $('safetyEstop').className = s.estop ? 'error-text' : 'safe-text';
   $('safetyRobot').textContent = robotKo(robot.state_name);
   $('safetyRobot').className = badRobot ? 'error-text' : robot.state == null ? '' : 'safe-text';
   $('safetyFoot').textContent = s.estop ? '비상 정지' : badRobot ? '고장' : '정상';
   $('estopBtn').classList.toggle('triggered', s.estop);
   $('estopLabel').textContent = s.estop ? '비상 정지 해제' : '비상 정지';
+  $('monEstopLabel').textContent = s.estop ? '비상 정지 해제' : '비상 정지';
+  $('monEstopBtn').classList.toggle('triggered', s.estop);
   $('armedTag').textContent = s.estop ? '잠김' : '준비';
   $('startBtn').disabled = s.estop;
+  $('homeBtn').disabled = s.estop;
+  $('speedUnlockBtn').disabled = s.estop && !s.speed?.unlocked;
+  renderSpeed(s.speed);
 
   renderRuns(runs, active, waiting);
 }
@@ -333,31 +500,158 @@ function drawForce() {
   $('forceTrace').setAttribute('points', pts.join(' '));
 }
 
-function drawViews(p) {
-  const grid = (minX, maxX, minY, maxY) => {
-    let g = '';
-    for (let x = Math.ceil(minX / 200) * 200; x <= maxX; x += 200) g += `<line x1="${x}" y1="${minY}" x2="${x}" y2="${maxY}" class="g${x === 0 ? ' axis' : ''}"/>`;
-    for (let y = Math.ceil(minY / 200) * 200; y <= maxY; y += 200) g += `<line x1="${minX}" y1="${y}" x2="${maxX}" y2="${y}" class="g${y === 0 ? ' axis' : ''}"/>`;
-    return g;
-  };
-  // TOP: SVG x = X, SVG y = -Y
-  const topTrail = ui.trail.map((q) => `${q[0]},${-q[1]}`).join(' ');
-  let top = grid(-1000, 1000, -1000, 1000);
-  top += `<circle cx="0" cy="0" r="${REACH}" class="reach"/><circle cx="0" cy="0" r="60" class="base"/><text x="70" y="-70" class="lbl">BASE</text>`;
-  top += `<polyline points="${topTrail}" class="trail"/>`;
-  if (p) top += `<line x1="0" y1="0" x2="${p[0]}" y2="${-p[1]}" class="arm"/><circle cx="${p[0]}" cy="${-p[1]}" r="28" class="tcp"/><text x="${p[0] + 40}" y="${-p[1] - 40}" class="lbl tcp-l">TCP</text>`;
-  else top += '<text x="0" y="0" class="lbl nodata" text-anchor="middle">위치 데이터 없음</text>';
-  top += '<text x="940" y="-20" class="lbl">+X</text><text x="20" y="-940" class="lbl">+Y</text>';
-  $('topView').innerHTML = top;
+// ------------------------------------------------------------------ 로봇 자세 (관절 = 원, 링크 = 선, TCP = 그리퍼)
+// M0609 URDF(dsr_description2/xacro/macro.m0609.*.xacro) 의 joint origin [xyz(m), rpy(rad)]
+const M0609_JOINTS = [
+  [[0, 0, 0.1345], [0, 0, 0]],
+  [[0, 0.0062, 0], [0, -1.571, -1.571]],
+  [[0.411, 0, 0], [0, 0, 1.571]],
+  [[0, -0.368, 0], [1.571, 0, 0]],
+  [[0, 0, 0], [-1.571, 0, 0]],
+  [[0, -0.121, 0], [1.571, 0, 0]],
+];
+const HOME_Q = [0, 0, 90, 0, 90, 0];
+const GRIP_DEFAULT_LEN = 150; // posx 가 없을 때 그리퍼 길이 (mm)
 
-  // SIDE: SVG x = X, SVG y = -Z
-  const sideTrail = ui.trail.map((q) => `${q[0]},${-q[2]}`).join(' ');
-  let side = grid(-1000, 1000, -1300, 300);
-  side += `<rect x="-90" y="-0" width="180" height="40" class="base"/><line x1="-1000" y1="0" x2="1000" y2="0" class="floor"/>`;
-  side += `<polyline points="${sideTrail}" class="trail"/>`;
-  if (p) side += `<line x1="0" y1="-150" x2="${p[0]}" y2="${-p[2]}" class="arm"/><circle cx="${p[0]}" cy="${-p[2]}" r="28" class="tcp"/>`;
-  side += '<text x="940" y="-20" class="lbl">+X</text><text x="20" y="-1240" class="lbl">+Z</text>';
-  $('sideView').innerHTML = side;
+const mmul = (A, B) => A.map((row) => [0, 1, 2, 3].map((j) => row.reduce((acc, v, k) => acc + v * B[k][j], 0)));
+function rpyMat(r, p, y, t = [0, 0, 0]) {
+  const [cr, sr, cp, sp, cy, sy] = [Math.cos(r), Math.sin(r), Math.cos(p), Math.sin(p), Math.cos(y), Math.sin(y)];
+  return [
+    [cy * cp, cy * sp * sr - sy * cr, cy * sp * cr + sy * sr, t[0]],
+    [sy * cp, sy * sp * sr + cy * cr, sy * sp * cr - cy * sr, t[1]],
+    [-sp, cp * sr, cp * cr, t[2]],
+    [0, 0, 0, 1],
+  ];
+}
+
+/** 관절각(deg) → 각 관절 원점 위치(mm)와 플랜지 좌표계 */
+function forwardKinematics(qDeg) {
+  let T = [[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]];
+  const pts = [];
+  M0609_JOINTS.forEach(([xyz, rpy], i) => {
+    T = mmul(mmul(T, rpyMat(rpy[0], rpy[1], rpy[2], xyz)), rpyMat(0, 0, (qDeg[i] * Math.PI) / 180));
+    pts.push([T[0][3] * 1000, T[1][3] * 1000, T[2][3] * 1000]);
+  });
+  const axis = (c) => [T[0][c], T[1][c], T[2][c]];
+  return { pts, x: axis(0), y: axis(1), z: axis(2) };
+}
+
+// 고정 시점: 로봇의 오른쪽 앞 위(+X, -Y, +Z 방향)에서 본 등각(3/4) 투영
+//   화면에서 +X 는 오른쪽 아래(앞으로 나옴), +Y 는 오른쪽 위(뒤로 들어감), +Z 는 위
+const ISO_C = Math.cos(Math.PI / 6);
+const ISO_S = Math.sin(Math.PI / 6);
+const iso = ([x, y, z]) => [(x + y) * ISO_C, (x - y) * ISO_S - z];
+const isoStr = (p) => iso(p).map((v) => v.toFixed(1)).join(',');
+const add = (a, b, k = 1) => [a[0] + b[0] * k, a[1] + b[1] * k, a[2] + b[2] * k];
+const lerp = (a, b, t) => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t];
+const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+
+const GRID = { xMin: -200, xMax: 800, yMin: -500, yMax: 500, step: 100, zMax: 850 };
+
+function drawFloor() {
+  let g = '';
+  for (let x = GRID.xMin; x <= GRID.xMax; x += GRID.step) g += `<line x1="${iso([x, GRID.yMin, 0])[0]}" y1="${iso([x, GRID.yMin, 0])[1]}" x2="${iso([x, GRID.yMax, 0])[0]}" y2="${iso([x, GRID.yMax, 0])[1]}" class="g${x === 0 ? ' axis' : ''}"/>`;
+  for (let y = GRID.yMin; y <= GRID.yMax; y += GRID.step) g += `<line x1="${iso([GRID.xMin, y, 0])[0]}" y1="${iso([GRID.xMin, y, 0])[1]}" x2="${iso([GRID.xMax, y, 0])[0]}" y2="${iso([GRID.xMax, y, 0])[1]}" class="g${y === 0 ? ' axis' : ''}"/>`;
+  // 좌표축 표시 (방향만, 바닥 격자 왼쪽 모서리에 150mm). 베이스 기둥에 가리지 않게 옮겨 둠
+  const o = [GRID.xMin, GRID.yMin, 0];
+  const [ox, oy] = iso(o);
+  [['X', [150, 0, 0]], ['Y', [0, 150, 0]], ['Z', [0, 0, 150]]].forEach(([n, v]) => {
+    const [x2, y2] = iso(add(o, v));
+    const [lx, ly] = iso(add(o, v, 1.3));
+    g += `<line x1="${ox}" y1="${oy}" x2="${x2}" y2="${y2}" class="axis-arrow" marker-end="url(#axisHead)"/><text x="${lx}" y="${ly}" class="lbl axis-l" text-anchor="middle" dominant-baseline="middle">${n}</text>`;
+  });
+  return g;
+}
+
+function viewBoxFor() {
+  const corners = [];
+  [GRID.xMin, GRID.xMax].forEach((x) => [GRID.yMin, GRID.yMax].forEach((y) => [0, GRID.zMax].forEach((z) => corners.push(iso([x, y, z])))));
+  const xs = corners.map((c) => c[0]);
+  const ys = corners.map((c) => c[1]);
+  const pad = 40;
+  const padRight = 520; // TCP 좌표 라벨 공간
+  return `${Math.min(...xs) - pad} ${Math.min(...ys) - pad} ${Math.max(...xs) - Math.min(...xs) + pad + padRight} ${Math.max(...ys) - Math.min(...ys) + pad * 2}`;
+}
+
+function drawArm(joints, posx) {
+  const svg = $('armView');
+  if (!svg.dataset.ready) {
+    svg.setAttribute('viewBox', viewBoxFor());
+    svg.dataset.ready = '1';
+  }
+  const live = Array.isArray(joints) && joints.length >= 6 && joints.every(Number.isFinite);
+  const q = live ? joints : HOME_Q;
+  const fk = forwardKinematics(q);
+  const [, p2, p3, p4, , p6] = fk.pts;          // p1≈p2 (어깨), p4=p5 (손목)
+  const base = [0, 0, 0];
+
+  // 관절 표시 위치: 각 관절의 회전축 위 (J1 은 기둥, J4 는 아래팔 축 위, J6 은 플랜지)
+  const marks = [
+    ['J1', [0, 0, 70]],
+    ['J2', p2],
+    ['J3', p3],
+    ['J4', lerp(p3, p4, 0.72)],
+    ['J5', p4],
+    ['J6', p6],
+  ];
+
+  // 그리퍼: 플랜지 z 축 방향. 길이는 실제 TCP(posx) 가 있으면 그에 맞춤
+  let len = GRIP_DEFAULT_LEN;
+  if (live && posx) {
+    const d = dot([posx[0] - p6[0], posx[1] - p6[1], posx[2] - p6[2]], fk.z);
+    if (d > 60 && d < 350) len = d;
+  }
+  const bodyEnd = add(p6, fk.z, len * 0.45);
+  const halfW = 42;
+  const palmA = add(bodyEnd, fk.y, halfW);
+  const palmB = add(bodyEnd, fk.y, -halfW);
+  const tipA = add(palmA, fk.z, len * 0.55);
+  const tipB = add(palmB, fk.z, len * 0.55);
+  const tcp = add(p6, fk.z, len);
+
+  let out = '<defs><marker id="axisHead" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="axis-head"/></marker></defs>';
+  out += drawFloor();
+
+  // 그림자 (바닥 투영) - 자세를 바닥에서 읽기 쉽게
+  const shadow = [base, p2, p3, p4, p6, tcp].map((p) => isoStr([p[0], p[1], 0])).join(' ');
+  out += `<polyline points="${shadow}" class="arm-shadow"/>`;
+
+  // TCP 궤적
+  if (ui.trail.length > 1) out += `<polyline points="${ui.trail.map((t) => isoStr(t)).join(' ')}" class="trail"/>`;
+
+  // 베이스
+  out += `<polygon points="${[[-90, -90, 0], [90, -90, 0], [90, 90, 0], [-90, 90, 0]].map(isoStr).join(' ')}" class="base-plate"/>`;
+
+  // 링크
+  const chain = [base, p2, p3, p4, p6];
+  out += `<polyline points="${chain.map(isoStr).join(' ')}" class="link${live ? '' : ' ghost'}"/>`;
+
+  // 그리퍼 (고정 모양: 몸통 + 손바닥 + 손가락 2개)
+  out += `<g class="gripper${live ? '' : ' ghost'}">`;
+  out += `<line x1="${iso(p6)[0]}" y1="${iso(p6)[1]}" x2="${iso(bodyEnd)[0]}" y2="${iso(bodyEnd)[1]}" class="grip-body"/>`;
+  out += `<polyline points="${[tipA, palmA, palmB, tipB].map(isoStr).join(' ')}" class="grip-finger"/>`;
+  out += `<circle cx="${iso(tcp)[0]}" cy="${iso(tcp)[1]}" r="9" class="tcp-dot"/>`;
+  out += '</g>';
+
+  // 관절 원 + 각도 라벨
+  marks.forEach(([name, p], i) => {
+    const [x, y] = iso(p);
+    out += `<circle cx="${x}" cy="${y}" r="${i === 0 ? 20 : 17}" class="joint${live ? '' : ' ghost'}"/>`;
+    // J4 는 J5 와 가까워 라벨을 원의 왼쪽 아래에 둔다
+    const below = name === 'J4';
+    out += `<text x="${below ? x - 24 : x + 28}" y="${below ? y + 50 : y - 22}" text-anchor="${below ? 'end' : 'start'}" class="lbl joint-l"><tspan class="jn">${name}</tspan> ${live ? `${q[i].toFixed(1)}°` : '--'}</text>`;
+  });
+
+  // TCP 좌표 라벨
+  const [tx, ty] = iso(tcp);
+  const tcpText = posx ? `X ${posx[0].toFixed(1)}  Y ${posx[1].toFixed(1)}  Z ${posx[2].toFixed(1)}` : '좌표 없음';
+  out += `<text x="${tx + 30}" y="${ty + 40}" class="lbl tcp-l"><tspan class="jn">TCP</tspan> ${tcpText}</text>`;
+
+  if (!live) {
+    const [cx, cy] = iso([300, 0, 900]);
+    out += `<text x="${cx}" y="${cy}" class="lbl nodata" text-anchor="middle">관절 데이터 없음 · 홈 자세로 표시</text>`;
+  }
+  svg.innerHTML = out;
 }
 
 function updateLatencyBars() {
@@ -373,12 +667,12 @@ function updateLatencyBars() {
 // ------------------------------------------------------------------ 연결
 function setConnected(on) {
   ui.connected = on;
-  $('bridgeText').textContent = on ? 'HMI 서버 연결됨' : '연결 끊김';
+  $('bridgeText').textContent = on ? '서버 연결됨' : '서버 연결 끊김';
   $('bridgeChip').classList.toggle('down', !on);
   $('railStatus').textContent = on ? 'HMI 서버 · 연결됨' : 'HMI 서버 · 연결 끊김';
   setDot('dotBridge', on ? 'green' : 'red');
   $('commBridge').textContent = on ? '연결됨' : '재연결 중';
-  $('streamText').textContent = on ? '실시간 연결됨' : '재연결 중…';
+  $('streamText').textContent = on ? '수신 중' : '다시 연결하는 중…';
   $('streamDot').className = on ? 'green' : '';
 }
 
@@ -387,7 +681,8 @@ function connect() {
   es.addEventListener('open', () => setConnected(true));
   es.addEventListener('error', () => setConnected(false));
   es.addEventListener('backlog', (e) => { ui.logs = []; ui.faults = 0; addLogs(JSON.parse(e.data)); });
-  es.addEventListener('log', (e) => addLogs([JSON.parse(e.data)]));
+  es.addEventListener('log', (e) => addLogs([JSON.parse(e.data)], true));
+  es.addEventListener('speed', (e) => renderSpeed(JSON.parse(e.data)));
   es.addEventListener('state', (e) => renderState(JSON.parse(e.data)));
   es.addEventListener('runs', (e) => { if (ui.state) renderState({ ...ui.state, runs: JSON.parse(e.data) }); });
 }
@@ -414,12 +709,28 @@ function bind() {
   $('startBtn').addEventListener('click', startTask);
   $('stopBtn').addEventListener('click', () => stopRun(null));
   $('estopBtn').addEventListener('click', toggleEstop);
+  $('homeBtn').addEventListener('click', goHome);
+  document.querySelectorAll('.page-tab').forEach((b) => b.addEventListener('click', () => setPage(b.dataset.page)));
+  window.addEventListener('hashchange', () => setPage(location.hash.slice(1), false));
+  $('monStopBtn').addEventListener('click', () => stopRun(null));
+  $('monEstopBtn').addEventListener('click', toggleEstop);
+  $('resetParamsBtn').addEventListener('click', resetParams);
+  const range = $('speedRange');
+  range.addEventListener('input', () => { ui.speedDragging = true; renderSpeed(ui.speed); });
+  range.addEventListener('change', () => { ui.speedDragging = false; setSpeed(Number(range.value)); });
+  $('speedDefaultBtn').addEventListener('click', () => setSpeed(100));
+  $('speedUnlockBtn').addEventListener('click', toggleSpeedLock);
+  document.querySelectorAll('.layout-btn').forEach((b) => b.addEventListener('click', () => setLayout(b.dataset.layout)));
+  $('alertPopup').addEventListener('change', (e) => { ui.alertOn = e.target.checked; if (!ui.alertOn) clearAlerts(); saveUi(); });
+  $('alertClear').addEventListener('click', clearAlerts);
   document.querySelectorAll('[data-filter]').forEach((b) => b.addEventListener('click', () => setFilter(b.dataset.filter)));
   $('clearBtn').addEventListener('click', () => { ui.logs = []; ui.faults = 0; ui.trail = []; renderLogs(); });
   $('focusBtn').addEventListener('click', () => $('simulationCard').classList.toggle('focused'));
   $('stdinForm').addEventListener('submit', (e) => { e.preventDefault(); sendStdin($('stdinText').value); });
   document.querySelectorAll('[data-quick]').forEach((b) => b.addEventListener('click', () => sendStdin(b.dataset.quick)));
   document.addEventListener('keydown', (e) => {
+    const typing = ['INPUT', 'SELECT', 'TEXTAREA'].includes(document.activeElement?.tagName);
+    if (!typing && (e.key === '1' || e.key === '2') && !e.ctrlKey && !e.altKey && !e.metaKey) { setPage(e.key === '1' ? 'control' : 'monitor'); return; }
     if (e.key === 'Escape' && !ui.state?.estop) { e.preventDefault(); api('/api/estop', {}).catch((err) => toast(err.message)); }
   });
   $('footerHost').textContent = location.host;
@@ -429,14 +740,20 @@ async function init() {
   loadUi();
   bind();
   setMode(ui.mode === 'real' ? 'real' : 'virtual');
+  setLayout(ui.layout);
+  setPage(PAGES.includes(location.hash.slice(1)) ? location.hash.slice(1) : ui.page);
+  $('alertPopup').checked = ui.alertOn !== false;
+  ui.alertOn = ui.alertOn !== false;
+  ui.speedDragging = false;
+  renderSpeed(ui.speed);
   setConnected(false);
   renderJoints(null);
-  drawViews(null);
+  drawArm(null, null);
   updateLatencyBars();
   setInterval(() => {
     const d = new Date();
     $('topClock').textContent = d.toLocaleTimeString('en-GB', { hour12: false });
-    $('topDate').textContent = d.toLocaleDateString('ko-KR', { year: 'numeric', month: 'long', day: 'numeric', weekday: 'short' });
+    $('topDate').textContent = d.toLocaleDateString('ko-KR', { month: 'long', day: 'numeric', weekday: 'short' });
   }, 1000);
   setInterval(measureLatency, 2000);
   for (;;) {
@@ -445,7 +762,7 @@ async function init() {
       ui.tasks = data.tasks;
       break;
     } catch (e) {
-      $('taskDesc').textContent = 'hmi_server 에 연결할 수 없습니다. 재시도 중…';
+      $('taskDesc').textContent = 'hmi_server 에 연결하지 못했습니다. 2초 뒤 다시 시도합니다.';
       await new Promise((r) => setTimeout(r, 2000));
     }
   }
