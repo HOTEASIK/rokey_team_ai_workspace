@@ -1,0 +1,149 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>작업대 평면도</title>
+<style>
+  :root { color-scheme: light; font-family: "Nanum Gothic", "Apple SD Gothic Neo", "Malgun Gothic", sans-serif; color: #202b29; background: #f2f4ef; }
+  * { box-sizing: border-box; }
+  body { margin: 0; }
+  main { width: min(100% - 36px, 850px); margin: clamp(24px, 6vw, 66px) auto; }
+  h1 { margin: 0 0 10px; font-size: clamp(24px, 4.5vw, 37px); letter-spacing: -.06em; }
+  .intro, figcaption { color: #4c5c55; font-size: 14px; line-height: 1.6; }
+  .intro { margin: 0 0 22px; }
+  figure { margin: 0; background: #fff; border: 1px solid #dce3da; border-radius: 18px; padding: 22px 12px 18px; }
+  .orientation { text-align: center; color: #45564d; font-size: 13px; }
+  .board {
+    position: relative; width: min(100% - 12px, 760px); aspect-ratio: 1200 / 650;
+    margin: 10px auto 14px; border: 1px solid #b69a76; border-radius: 6% / 11%;
+    background: linear-gradient(108deg,#e7cba1,#f0dbb9 56%,#e9d0ad);
+    box-shadow: 0 3px 0 #ad9171, 0 12px 26px #5b493314;
+  }
+  .hole, .home { position: absolute; left: var(--x); top: var(--y); transform: translate(-50%, -50%); border-radius: 50%; }
+  .hole { width: 2.6%; aspect-ratio: 1; border: 1px solid #55595a; background: radial-gradient(circle,#262d2d 0 24%,#787d79 28% 58%,#b0b0a4 74%); }
+  .hole b { z-index: 1; position: absolute; left: 50%; bottom: calc(100% + 2px); transform: translateX(-50%); color: #222a27; font-size: clamp(9px, 1.8vw, 14px); line-height: 1; }
+  button.hole, button.home { padding: 0; cursor: pointer; }
+  .measured { box-shadow: 0 0 0 2px #00705c; }
+  .measured::after { content: ""; position: absolute; inset: -4px -5px; }
+  .measured:focus-visible { outline: 2px solid #00705c; outline-offset: 4px; }
+  .reading { position: fixed; z-index: 5; pointer-events: none; max-width: calc(100vw - 16px); padding: 10px 12px; border-radius: 8px; background: #202b29; color: #fff; box-shadow: 0 4px 16px #0003; font-size: 13px; line-height: 1.55; font-variant-numeric: tabular-nums; }
+  .reading strong, .reading span { display: block; }
+  .reading span { white-space: nowrap; }
+  .home { width: 9px; height: 9px; border: 0; background: #00705c; box-shadow: 0 0 0 2px #fff; }
+  .home::after { inset: -7px; }
+  .ends { display: flex; justify-content: space-between; width: min(100% - 12px, 760px); margin: auto; }
+  .dim { position: absolute; color: #513b26; border-color: currentColor; border-style: solid; border-width: 0; }
+  .dim.horizontal { left: calc(var(--start) + 1.3%); top: var(--offset); width: calc(var(--length) - 2.6%); height: 0; border-width: 1px 1px 0; }
+  .dim.vertical { left: var(--offset); top: calc(var(--start) + 2.4%); width: 0; height: calc(var(--length) - 4.8%); border-width: 1px 0 1px 1px; }
+  .dim span { background: #f3dfbf; border-radius: 3px; padding: 1px 3px; position: absolute; font-size: clamp(10px, 2.5vw, 13px); font-variant-numeric: tabular-nums; font-weight: 700; white-space: nowrap; }
+  .horizontal span { left: 50%; top: 0; transform: translate(-50%, -50%); }
+  .vertical span { left: -12px; top: 50%; transform: translate(-50%, -50%) rotate(-90deg); }
+  .dim.small { color: #793209; }
+  .small span { top: 8px; transform: translateX(-50%); }
+  .legend { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px 22px; margin: 20px 0 0; font-size: 14px; }
+  .legend span { display: inline-flex; align-items: center; gap: 7px; }
+  .key-hole, .key-home { display: inline-block; border-radius: 50%; }
+  .key-hole { width: 13px; height: 13px; background: #898e86; border: 3px solid #a4a69c; box-shadow: inset 0 0 0 4px #343d3a; }
+  .key-home { width: 9px; height: 9px; background: #00705c; }
+  figcaption { margin: 10px auto 0; text-align: center; }
+  @media print { body { background: white; } main { margin: 0 auto; } figure { break-inside: avoid; } * { print-color-adjust: exact; } }
+</style>
+</head>
+<body>
+<main>
+  <h1>작업대 평면도</h1>
+  <p class="intro">위에서 내려다본 작업대와 그리퍼 홈 위치</p>
+  <figure>
+    <div class="ends orientation"><span>로봇 설치 쪽</span><span>작업대 앞쪽</span></div>
+    <div class="board" role="group" aria-label="가로 작업대. 원형 홈 18개. 1번과 2번, 1번과 5번의 중심 간격은 150 mm. 17번과 8번의 중심 간격은 50 mm. 초록 점은 홈 자세의 그리퍼 끝.">
+      <button type="button" class="hole measured" style="--x:44.583333%;--y:15.384615%" aria-label="1번 홈" data-position="X 275.26 · Y 224.15 · Z 34.16 mm" data-orientation="A 171.55° · B 179.87° · C 172.22°"><b>1</b></button>
+      <button type="button" class="hole measured" style="--x:57.083333%;--y:15.384615%" aria-label="2번 홈" data-position="X 426.11 · Y 223.19 · Z 34.23 mm" data-orientation="A 21.92° · B −179.89° · C 22.69°"><b>2</b></button>
+      <button type="button" class="hole measured" style="--x:69.583333%;--y:15.384615%" aria-label="3번 홈" data-position="X 576.88 · Y 222.03 · Z 34.57 mm" data-orientation="A 143.99° · B −179.85° · C 144.90°"><b>3</b></button>
+      <button type="button" class="hole measured" style="--x:82.083333%;--y:15.384615%" aria-label="4번 홈" data-position="X 713.40 · Y 222.19 · Z 35.69 mm" data-orientation="A 5.05° · B 179.09° · C 6.23°" data-note="홈 중심보다 살짝 왼쪽에서 측정"><b>4</b></button>
+      <button type="button" class="hole measured" style="--x:44.583333%;--y:38.461538%" aria-label="5번 홈" data-position="X 276.44 · Y 75.81 · Z 33.99 mm" data-orientation="A 6.64° · B −179.65° · C 7.26°"><b>5</b></button>
+      <button type="button" class="hole measured" style="--x:57.083333%;--y:38.461538%" aria-label="6번 홈" data-position="X 423.21 · Y 72.33 · Z 34.33 mm" data-orientation="A 30.81° · B −179.67° · C 31.56°"><b>6</b></button>
+      <button type="button" class="hole measured" style="--x:69.583333%;--y:38.461538%" aria-label="7번 홈" data-position="X 577.11 · Y 72.39 · Z 34.60 mm" data-orientation="A 72.79° · B −179.75° · C 73.41°"><b>7</b></button>
+      <button type="button" class="hole measured" style="--x:77.916667%;--y:38.461538%" aria-label="17번 홈" data-position="X 673.23 · Y 76.40 · Z 35.50 mm" data-orientation="A 88.79° · B −179.71° · C 89.33°"><b>17</b></button>
+      <button type="button" class="hole measured" style="--x:82.083333%;--y:38.461538%" aria-label="8번 홈" data-position="X 724.14 · Y 73.22 · Z 35.14 mm" data-orientation="A 115.07° · B −179.63° · C 115.78°"><b>8</b></button>
+      <button type="button" class="hole measured" style="--x:44.583333%;--y:61.538462%" aria-label="9번 홈" data-position="X 274.10 · Y −73.52 · Z 34.26 mm" data-orientation="A 48.58° · B 179.88° · C 49.72°"><b>9</b></button>
+      <button type="button" class="hole measured" style="--x:57.083333%;--y:61.538462%" aria-label="10번 홈" data-position="X 426.49 · Y −74.47 · Z 34.35 mm" data-orientation="A 19.40° · B 179.79° · C 20.42°"><b>10</b></button>
+      <button type="button" class="hole measured" style="--x:69.583333%;--y:61.538462%" aria-label="11번 홈" data-position="X 574.26 · Y −75.99 · Z 34.64 mm" data-orientation="A 178.16° · B −179.70° · C 179.05°"><b>11</b></button>
+      <button type="button" class="hole measured" style="--x:77.916667%;--y:61.538462%" aria-label="18번 홈" data-position="X 673.22 · Y −77.82 · Z 36.05 mm" data-orientation="A 86.68° · B −179.71° · C 87.41°"><b>18</b></button>
+      <button type="button" class="hole measured" style="--x:82.083333%;--y:61.538462%" aria-label="12번 홈" data-position="X 723.83 · Y −75.62 · Z 35.36 mm" data-orientation="A 74.08° · B −179.80° · C 74.54°"><b>12</b></button>
+      <button type="button" class="hole measured" style="--x:44.583333%;--y:84.615385%" aria-label="13번 홈" data-position="X 274.78 · Y −218.37 · Z 34.22 mm" data-orientation="A 145.75° · B 179.90° · C 146.65°"><b>13</b></button>
+      <button type="button" class="hole measured" style="--x:57.083333%;--y:84.615385%" aria-label="14번 홈" data-position="X 424.78 · Y −225.32 · Z 34.28 mm" data-orientation="A 142.93° · B 179.93° · C 143.70°"><b>14</b></button>
+      <button type="button" class="hole measured" style="--x:69.583333%;--y:84.615385%" aria-label="15번 홈" data-position="X 573.35 · Y −227.09 · Z 35.01 mm" data-orientation="A 44.09° · B −179.91° · C 44.73°"><b>15</b></button>
+      <button type="button" class="hole measured" style="--x:82.083333%;--y:84.615385%" aria-label="16번 홈" data-position="X 695.42 · Y −223.46 · Z 36.08 mm" data-orientation="A 80.78° · B −179.80° · C 81.29°" data-note="홈 중심보다 살짝 왼쪽에서 측정"><b>16</b></button>
+      <button type="button" class="home measured" style="--x:53%;--y:50.5%" aria-label="로봇 홈 위치" data-position="X 367.41 · Y 3.06 · Z 219.28 mm" data-orientation="A 140.70° · B 179.97° · C 141.21°" data-note="설정 홈 J1~J6 (°) · 0, 0, 90, 0, 90, 0"></button>
+      <div class="dim horizontal" style="--start:44.583333%;--length:12.5%;--offset:15.384615%"><span>150 mm</span></div>
+      <div class="dim vertical" style="--start:15.384615%;--length:23.076923%;--offset:44.583333%"><span>150 mm</span></div>
+      <div class="dim horizontal small" style="--start:77.916667%;--length:4.166666%;--offset:38.461538%"><span>50 mm</span></div>
+    </div>
+    <div class="legend">
+      <span><i class="key-hole" aria-hidden="true"></i> 원형 홈 18개</span>
+      <span><i class="key-home" aria-hidden="true"></i> 홈 자세의 그리퍼 끝</span>
+    </div>
+    <figcaption>
+      홈 중심 간 거리 · 1–2와 1–5는 150 mm, 17–8은 50 mm. 작업대 외곽과 초록 점의 위치는 사진을 바탕으로 배치했습니다.<br>
+      1~18번 홈과 초록 점에 마우스를 올리거나 누르면 펜던트의 BASE 좌표가 표시됩니다. 초록 점에서는 설정된 홈 관절각도 볼 수 있습니다.<br>
+      닫힌 RG2를 BASE 축 방향으로만 움직여 같은 행을 따라 측정했고, 그리퍼 자세는 따로 조작하지 않았습니다. 4번과 16번은 로봇의 이동 범위 때문에 홈 중심보다 살짝 왼쪽에서 측정했습니다.
+    </figcaption>
+  </figure>
+  <div id="reading" class="reading" role="tooltip" hidden>
+    <strong></strong><span></span><span></span><small></small>
+  </div>
+</main>
+<script>
+  const reading = document.querySelector('#reading');
+  let activeHole = null;
+
+  function hideReading() {
+    activeHole?.removeAttribute('aria-describedby');
+    activeHole = null;
+    reading.hidden = true;
+  }
+
+  function showReading(hole) {
+    hideReading();
+    activeHole = hole;
+    const [heading, position, orientation, note] = reading.children;
+    heading.textContent = hole.getAttribute('aria-label') + ' · BASE';
+    position.textContent = hole.dataset.position;
+    orientation.textContent = hole.dataset.orientation;
+    note.textContent = hole.dataset.note || '';
+    reading.hidden = false;
+    hole.setAttribute('aria-describedby', reading.id);
+
+    const bounds = hole.getBoundingClientRect();
+    const left = bounds.left + (bounds.width - reading.offsetWidth) / 2;
+    const below = bounds.bottom + 8;
+    reading.style.left = Math.max(8, Math.min(left, window.innerWidth - reading.offsetWidth - 8)) + 'px';
+    reading.style.top = (below + reading.offsetHeight < window.innerHeight
+      ? below : Math.max(8, bounds.top - reading.offsetHeight - 8)) + 'px';
+  }
+
+  for (const hole of document.querySelectorAll('.measured')) {
+    hole.addEventListener('pointerenter', event => {
+      if (event.pointerType !== 'touch') showReading(hole);
+    });
+    hole.addEventListener('pointerleave', event => {
+      if (event.pointerType !== 'touch' && activeHole === hole) hideReading();
+    });
+    hole.addEventListener('focus', () => showReading(hole));
+    hole.addEventListener('blur', () => {
+      if (activeHole === hole) hideReading();
+    });
+    hole.addEventListener('click', () => showReading(hole));
+  }
+  document.addEventListener('click', event => {
+    if (!event.target.closest('.measured')) hideReading();
+  });
+  document.addEventListener('keydown', event => {
+    if (event.key === 'Escape') hideReading();
+  });
+  window.addEventListener('resize', hideReading);
+  window.addEventListener('scroll', hideReading);
+</script>
+</body>
+</html>
