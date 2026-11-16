@@ -1,43 +1,31 @@
-import rclpy
-import DR_init
-from rokey1.service_waiter import ServiceWaiter
+from utils.aspects import dsr_main
+from utils.service_waiter import ServiceWaiter
 
 # ===== 로봇 설정 =====
-ROBOT_ID = "dsr01"
-ROBOT_MODEL = "m0609"
+# 로봇 ID / 모델은 dsr_main 기본값(dsr01, m0609). 다르면 dsr_main(..., robot_id=, robot_model=)
 VELOCITY, ACC = 30, 30   # 속도, 가속도
 CYCLE = 1                # 반복 횟수
 
-DR_init.__dsr__id = ROBOT_ID
-DR_init.__dsr__model = ROBOT_MODEL
 
+# 노드 생성 / 예외 로깅 / 종료 정리(destroy_node, rclpy.shutdown)는 dsr_main 이 처리한다
+@dsr_main("node_name")   # TODO: 노드 이름
+def main(app):
+    node = app.node
 
-def main(args=None):
-    rclpy.init(args=args)
-    node = rclpy.create_node("node_name", namespace=ROBOT_ID)   # TODO: 노드 이름
-
-    DR_init.__dsr__node = node
-
-    try:
-        from DSR_ROBOT2 import (
-            set_tool,
-            set_tcp,
-            movej,
-            movel,
-            # TODO: 사용할 함수 추가
-        )
-
-        from DR_common2 import posx, posj
-
-    except ImportError as e:
-        node.get_logger().info(f"Error importing DSR_ROBOT2 : {e}")
-        return
+    import DSR_ROBOT2
+    from DSR_ROBOT2 import (
+        set_tool,
+        set_tcp,
+        movej,
+        movel,
+        # TODO: 사용할 함수 추가
+    )
+    from DR_common2 import posx, posj
 
     # ===== 서비스 준비될 때까지 대기 =====
     # 사용하는 함수의 서비스 클라이언트를 적는다
     #   set_tool -> _ros2_set_current_tool,  set_tcp -> _ros2_set_current_tcp
     #   movej    -> _ros2_movej,             movel   -> _ros2_movel
-    import DSR_ROBOT2
     ServiceWaiter(node).wait(
         DSR_ROBOT2._ros2_set_current_tool,
         DSR_ROBOT2._ros2_set_current_tcp,
@@ -55,27 +43,18 @@ def main(args=None):
     # TODO: posj1 = posj([J1, J2, J3, J4, J5, J6])
     # TODO: posx1 = posx([X, Y, Z, A, B, C])
 
+    # ===== 종료 시 정리 동작 (예외/Ctrl+C 에도 실행) =====
+    app.on_shutdown("Failed to move home", lambda: movej(homej, vel=VELOCITY, acc=ACC))
+
     movej(homej, vel=VELOCITY, acc=ACC)
 
-    try:
-        for i in range(CYCLE):
-            node.get_logger().info(f"Cycle {i+1}")
+    for i in range(CYCLE):
+        node.get_logger().info(f"Cycle {i+1}")
 
-            # ===== 동작 작성 =====
-            # TODO: movej(posj1, vel=VELOCITY, acc=ACC)
-            # TODO: movel(posx1, vel=VELOCITY, acc=ACC)
-            pass
-
-    except KeyboardInterrupt:
-        node.get_logger().info("Program Stopped")
-
-    except Exception as e:
-        node.get_logger().info(f"Robot Error: {e}")
-
-    finally:
-        movej(homej, vel=VELOCITY, acc=ACC)
-        node.destroy_node()
-        rclpy.shutdown()
+        # ===== 동작 작성 =====
+        # TODO: movej(posj1, vel=VELOCITY, acc=ACC)
+        # TODO: movel(posx1, vel=VELOCITY, acc=ACC)
+        pass
 
 
 if __name__ == "__main__":
