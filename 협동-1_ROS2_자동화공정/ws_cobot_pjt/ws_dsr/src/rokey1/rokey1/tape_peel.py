@@ -22,6 +22,9 @@
 import rclpy
 import DR_init
 
+from utils.move_stop import MoveStopClient
+from utils.shutdown import safe_shutdown
+
 ROBOT_ID = 'dsr01'
 ROBOT_MODEL = 'm0609'
 TOOL_NAME = 'Tool Weight'
@@ -35,10 +38,14 @@ P_MID = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
 P_END = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
 
 APPROACH_OFFSET = 50.0    # P_START 위쪽(BASE +Z) 접근 높이 [mm]
-SCAN_VEL = [10.0, 10.0]   # 탐색 속도 [mm/s, deg/s]
+APPROACH_VELOCITY = [50.0, 30.0]   # 접근/후퇴 속도 [mm/s, deg/s]
+APPROACH_ACC = [100.0, 60.0]
+SCAN_VELOCITY = [10.0, 10.0]   # 탐색 속도 [mm/s, deg/s]
+SCAN_ACC = [50.0, 30.0]
 FORCE_THRESHOLD = 5.0     # Tool Z 반력 변화량 임계값 [N] (실측 후 조정)
 PULL_DIST = 80.0          # 떼어낼 때 Tool -Z 로 당기는 거리 [mm]
-PULL_VEL = [20.0, 10.0]
+PULL_VELOCITY = [20.0, 10.0]
+PULL_ACC = [50.0, 30.0]
 
 
 def main(args=None):
@@ -48,12 +55,14 @@ def main(args=None):
     node = rclpy.create_node('tape_peel', namespace=ROBOT_ID)
     DR_init.__dsr__node = node
 
-    import DSR_ROBOT2 as robot
-    from DSR_ROBOT2 import posj, posx
-    from dsr_msgs2.srv import MoveStop
+    try:
+        import DSR_ROBOT2 as robot
+        from DSR_ROBOT2 import posj, posx
+    except ImportError as e:
+        node.get_logger().info(f'Error importing DSR_ROBOT2 : {e}')
+        return
 
-    log = node.get_logger().info
-    stop_cli = node.create_client(MoveStop, 'dsr_controller2/motion/move_stop')
+    stopper = MoveStopClient(node)
 
     def gripper(close):
         robot.set_digital_output(1, 1 if close else 0)
@@ -61,9 +70,7 @@ def main(args=None):
         robot.wait(1.0)
 
     def quick_stop():
-        req = MoveStop.Request()
-        req.stop_mode = robot.DR_QSTOP
-        rclpy.spin_until_future_complete(node, stop_cli.call_async(req))
+        stopper.stop(robot.DR_QSTOP)
 
     def tool_fz():
         return robot.get_tool_force(robot.DR_TOOL)[2]
@@ -79,38 +86,37 @@ def main(args=None):
         gripper(close=False)
         approach = list(P_START)
         approach[2] += APPROACH_OFFSET
-        robot.movel(posx(*approach), vel=[50.0, 30.0], acc=[100.0, 60.0])
-        robot.movel(posx(*P_START), vel=SCAN_VEL, acc=[50.0, 30.0])
+        robot.movel(posx(*approach), vel=APPROACH_VELOCITY, acc=APPROACH_ACC)
+        robot.movel(posx(*P_START), vel=SCAN_VELOCITY, acc=SCAN_ACC)
         robot.wait(0.5)
 
         # 2) 원호 탐색 + 반력 감시
         base = tool_fz()
-        log(f'baseline Fz = {base:.2f} N')
-        robot.amovec(posx(*P_MID), posx(*P_END), vel=SCAN_VEL, acc=[50.0, 30.0])
+        node.get_logger().info(f'baseline Fz = {base:.2f} N')
+        robot.amovec(posx(*P_MID), posx(*P_END), vel=SCAN_VELOCITY, acc=SCAN_ACC)
         found = False
         while robot.check_motion() != robot.DR_STATE_IDLE:
             dF = tool_fz() - base
-            log(f'dF = {dF:+.2f} N')
+            node.get_logger().info(f'dF = {dF:+.2f} N')
             if abs(dF) > FORCE_THRESHOLD:
                 quick_stop()
                 found = True
                 break
 
         if not found:
-            log('끝단을 찾지 못함 → 후퇴')
-            robot.movel(posx(*approach), vel=[50.0, 30.0], acc=[100.0, 60.0])
+            node.get_logger().info('끝단을 찾지 못함 → 후퇴')
+            robot.movel(posx(*approach), vel=APPROACH_VELOCITY, acc=APPROACH_ACC)
             return
-        log(f'끝단 감지 @ {robot.get_current_posx()[0]}')
+        node.get_logger().info(f'끝단 감지 @ {robot.get_current_posx()[0]}')
 
         # 3) 잡고 당기기 (진행 반대 방향 = Tool -Z)
         robot.wait(0.5)
         gripper(close=True)
-        robot.movel(posx(0, 0, -PULL_DIST, 0, 0, 0), vel=PULL_VEL, acc=[50.0, 30.0],
+        robot.movel(posx(0, 0, -PULL_DIST, 0, 0, 0), vel=PULL_VELOCITY, acc=PULL_ACC,
                     ref=robot.DR_TOOL, mod=robot.DR_MV_MOD_REL)
-        log('떼어내기 완료')
+        node.get_logger().info('떼어내기 완료')
     finally:
-        node.destroy_node()
-        rclpy.shutdown()
+        safe_shutdown(node)
 
 
 if __name__ == '__main__':

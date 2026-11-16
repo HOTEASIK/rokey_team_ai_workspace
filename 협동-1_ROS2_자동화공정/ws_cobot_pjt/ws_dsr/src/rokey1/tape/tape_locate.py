@@ -25,6 +25,9 @@ import numpy as np
 import rclpy
 import DR_init
 
+from utils.move_stop import MoveStopClient
+from utils.shutdown import safe_shutdown
+
 ROBOT_ID = 'dsr01'
 ROBOT_MODEL = 'm0609'
 TOOL_NAME = 'Tool Weight'
@@ -39,8 +42,8 @@ PROBE_ANGLES = [-90.0, -45.0, 0.0, 45.0]  # 0 = 꼭대기, 음수 = 로봇 쪽(-
 START_GAP = 30.0                      # 표면에서 이만큼 떨어진 곳에서 출발 [mm]
 MAX_DEPTH = 10.0                      # 표면 안쪽으로 최대 이만큼까지 진행 [mm]
 SAFE_DZ = 60.0                        # 이동 시 롤 꼭대기 위 여유 높이 [mm]
-PROBE_VEL = [5.0, 5.0]
-MOVE_VEL = [50.0, 30.0]
+PROBE_VELOCITY = [5.0, 5.0]
+MOVE_VELOCITY = [50.0, 30.0]
 ACC = [100.0, 60.0]
 FORCE_THRESHOLD = 3.0                 # 접촉 판정: 힘 변화량 크기 [N]
 
@@ -79,10 +82,12 @@ def main(args=None):
     node = rclpy.create_node('tape_locate', namespace=ROBOT_ID)
     DR_init.__dsr__node = node
 
-    import DSR_ROBOT2 as robot
-    from DSR_ROBOT2 import posj, posx
-    from dsr_msgs2.srv import MoveStop
-    log = node.get_logger().info
+    try:
+        import DSR_ROBOT2 as robot
+        from DSR_ROBOT2 import posj, posx
+    except ImportError as e:
+        node.get_logger().info(f'Error importing DSR_ROBOT2 : {e}')
+        return
 
     try:
         if opt.mode == 'teach':
@@ -96,14 +101,12 @@ def main(args=None):
         else:
             with open(MODEL_FILE) as f:
                 xc, yc, zc = json.load(f)['center_mm']
-        log(f'대략 중심: ({xc:.1f}, {yc:.1f}, {zc:.1f})')
+        node.get_logger().info(f'대략 중심: ({xc:.1f}, {yc:.1f}, {zc:.1f})')
 
-        stop_cli = node.create_client(MoveStop, 'dsr_controller2/motion/move_stop')
+        stopper = MoveStopClient(node)
 
         def quick_stop():
-            req = MoveStop.Request()
-            req.stop_mode = robot.DR_QSTOP
-            rclpy.spin_until_future_complete(node, stop_cli.call_async(req))
+            stopper.stop(robot.DR_QSTOP)
 
         def force():
             return np.array(robot.get_tool_force(robot.DR_BASE)[:3])
@@ -119,7 +122,7 @@ def main(args=None):
         robot.set_robot_mode(robot.ROBOT_MODE_AUTONOMOUS)
 
         def mv(p):
-            if robot.movel(p, vel=MOVE_VEL, acc=ACC) < 0:
+            if robot.movel(p, vel=MOVE_VELOCITY, acc=ACC) < 0:
                 raise RuntimeError(f'movel 실패: {list(p)}')
 
         # 관절 0 자세(특이점)에서는 movel 이 실패하므로 홈부터 간다
@@ -136,7 +139,7 @@ def main(args=None):
             mv(start)
             robot.wait(0.5)
             base = force()
-            robot.amovel(pt(th, ROLL_R - MAX_DEPTH), vel=PROBE_VEL, acc=ACC)
+            robot.amovel(pt(th, ROLL_R - MAX_DEPTH), vel=PROBE_VELOCITY, acc=ACC)
             hit = False
             while robot.check_motion() != robot.DR_STATE_IDLE:
                 if np.linalg.norm(force() - base) > FORCE_THRESHOLD:
@@ -149,18 +152,17 @@ def main(args=None):
             mv(posx(*above))
             if not hit:
                 raise RuntimeError(f'{th}° 에서 접촉 없음 → 대략 중심 확인')
-            log(f'{th:+.0f}° 접촉: x={p[0]:.2f} z={p[2]:.2f}')
+            node.get_logger().info(f'{th:+.0f}° 접촉: x={p[0]:.2f} z={p[2]:.2f}')
             hits.append([th, p[0], p[2]])
 
         _, xs, zs = zip(*hits)
         fx, fz, fr, rms = fit_circle(xs, zs)
-        log(f'피팅: 중심 x={fx:.2f} z={fz:.2f}, r={fr:.2f} (롤 {ROLL_R} + 손끝), rms={rms:.2f}mm')
+        node.get_logger().info(
+            f'피팅: 중심 x={fx:.2f} z={fz:.2f}, r={fr:.2f} (롤 {ROLL_R} + 손끝), rms={rms:.2f}mm')
         save_model([fx, yc, fz], 'probe',
                    {'fit_r_mm': round(fr, 2), 'rms_mm': round(rms, 3), 'hits': hits})
     finally:
-        node.destroy_node()
-        if rclpy.ok():
-            rclpy.shutdown()
+        safe_shutdown(node)
 
 
 if __name__ == '__main__':

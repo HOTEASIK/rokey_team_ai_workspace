@@ -61,6 +61,10 @@ import numpy as np
 import rclpy
 import DR_init
 
+from utils.move_stop import MoveStopClient
+from utils.service_waiter import ServiceWaiter
+from utils.shutdown import run_cleanups, safe_shutdown
+
 try:
     from navigation.wall_modeling import robust_fit_plane, plane_basis, fit_quadratic_surface
     from navigation.wall_rviz import WallMarkerPublisher
@@ -109,15 +113,15 @@ RVIZ_EVERY = 10               # (real) 슬라이딩 중 N 개 점마다 RViz 갱
 # =============================================================================
 # 속도 / 힘 (speed 파라미터로 전체 배율 조절)
 # =============================================================================
-MOVE_VEL, MOVE_ACC = 50.0, 100.0      # 일반 이동 (느리게)
-DESCEND_VEL = 20.0                    # 안전 높이 → 프로빙 시작점 하강
-PROBE_VEL, PROBE_ACC = 5.0, 30.0      # 더듬는 속도 (정밀 측정)
-DEEP_PROBE_VEL = 20.0                 # 2차 깊은 탐색 속도 (deep_vel 파라미터)
+MOVE_VELOCITY, MOVE_ACC = 50.0, 100.0      # 일반 이동 (느리게)
+DESCEND_VELOCITY = 20.0                    # 안전 높이 → 프로빙 시작점 하강
+PROBE_VELOCITY, PROBE_ACC = 5.0, 30.0      # 더듬는 속도 (정밀 측정)
+DEEP_PROBE_VELOCITY = 20.0                 # 2차 깊은 탐색 속도 (deep_vel 파라미터)
                                       # 빠를수록 접촉 순간 더 파고듦 → 실제 로봇은 30 이하 권장
-DEEP_BACKOFF = 15.0                   # 2차에서 닿으면 이만큼 올라가 PROBE_VEL 로 정밀 재측정
-SCAN_VEL, SCAN_ACC = 10.0, 30.0       # 슬라이딩 속도
-ROT_VEL, ROT_ACC = 20.0, 40.0         # 자세 회전 속도 [deg/s]
-JOINT_VEL, JOINT_ACC = 20.0, 20.0
+DEEP_BACKOFF = 15.0                   # 2차에서 닿으면 이만큼 올라가 PROBE_VELOCITY 로 정밀 재측정
+SCAN_VELOCITY, SCAN_ACC = 10.0, 30.0       # 슬라이딩 속도
+ROT_VELOCITY, ROT_ACC = 20.0, 40.0         # 자세 회전 속도 [deg/s]
+JOINT_VELOCITY, JOINT_ACC = 20.0, 20.0
 
 FORCE_THRESHOLD = 5.0                 # 접촉 판정 [N]
 GUARD_FORCE = 25.0                    # 일반 이동 중 이 힘 이상이면 충돌로 보고 정지 [N]
@@ -320,23 +324,15 @@ class RobotIO:
         self.force_bias = np.zeros(6)
         self.force_on = False
         self.compliance_on = False
-        from dsr_msgs2.srv import MoveStop
-        self._MoveStop = MoveStop
-        self.stop_cli = node.create_client(MoveStop, 'dsr_controller2/motion/move_stop')
+        self.stopper = MoveStopClient(node)
         from dsr_msgs2.srv import SetRobotControl
         self._SetRobotControl = SetRobotControl
         self.ctrl_cli = node.create_client(SetRobotControl, 'dsr_controller2/system/set_robot_control')
 
-    def log(self, msg):
-        self.node.get_logger().info(msg)
-
-    def warn(self, msg):
-        self.node.get_logger().warn(msg)
-
     def wait_for_services(self):
         d = self.dsr
         clients = [d._ros2_set_robot_mode, d._ros2_movej, d._ros2_movel,
-                   d._ros2_get_current_posx, d._ros2_check_motion, self.stop_cli,
+                   d._ros2_get_current_posx, d._ros2_check_motion, self.stopper.cli,
                    d._ros2_ikin, d._ros2_get_robot_state, d._ros2_get_last_alarm,
                    d._ros2_change_collision_sensitivity, self.ctrl_cli]
         if self.mode == 'real':
@@ -344,9 +340,7 @@ class RobotIO:
                         d._ros2_get_tool_force, d._ros2_set_ref_coord,
                         d._ros2_task_compliance_ctrl, d._ros2_set_desired_force,
                         d._ros2_release_force, d._ros2_release_compliance_ctrl]
-        for cli in clients:
-            while not cli.wait_for_service(timeout_sec=1.0):
-                self.log(f'서비스 대기 중: {cli.srv_name}')
+        ServiceWaiter(self.node).wait(*clients)
 
     # ---------------------------------------------------------------- 상태 / 알람
     def robot_state(self):
@@ -363,10 +357,10 @@ class RobotIO:
                 msg += f', 마지막 알람: group {alarm.group} / index {alarm.index} (level {alarm.level})'
                 if alarm.index in ALARM_HINTS:
                     msg += f'\n       → {ALARM_HINTS[alarm.index]}'
-            self.warn(msg)
+            self.node.get_logger().warn(msg)
             return st
         except Exception as e:
-            self.warn(f'[진단] 상태 읽기 실패: {e}')
+            self.node.get_logger().warn(f'[진단] 상태 읽기 실패: {e}')
             return -1
 
     def is_safe_stopped(self):
@@ -383,7 +377,7 @@ class RobotIO:
         self.diagnose()
         if self.mode == 'real':
             raise SafetyError('로봇이 안전정지 상태입니다. 원인 확인 후 티칭 펜던트에서 해제하고 다시 실행하세요')
-        self.log('[virtual] 에뮬레이터 안전정지 해제 (CONTROL_RESET_SAFE_STOP)')
+        self.node.get_logger().info('[virtual] 에뮬레이터 안전정지 해제 (CONTROL_RESET_SAFE_STOP)')
         req = self._SetRobotControl.Request()
         req.robot_control = CONTROL_RESET_SAFE_STOP
         future = self.ctrl_cli.call_async(req)
@@ -398,7 +392,7 @@ class RobotIO:
         d.set_robot_mode(d.ROBOT_MODE_AUTONOMOUS)
         if collision_sensitivity is not None:
             ret = d.change_collision_sensitivity(int(collision_sensitivity))
-            self.log(f'충돌 감도 = {int(collision_sensitivity)} (ret={ret})')
+            self.node.get_logger().info(f'충돌 감도 = {int(collision_sensitivity)} (ret={ret})')
         if self.mode == 'real':
             d.set_tool(TOOL_NAME)
             d.set_tcp(TCP_NAME)
@@ -413,10 +407,10 @@ class RobotIO:
 
     # ---------------------------------------------------------------- 이동
     def move_j(self, q):
-        self._check(self.dsr.movej(self.dsr.posj(*q), vel=JOINT_VEL * self.speed,
+        self._check(self.dsr.movej(self.dsr.posj(*q), vel=JOINT_VELOCITY * self.speed,
                                    acc=JOINT_ACC * self.speed), 'movej', q)
 
-    def move_l(self, xyz, vel=MOVE_VEL, acc=MOVE_ACC, guard=True, in_area=True, ori=None):
+    def move_l(self, xyz, vel=MOVE_VELOCITY, acc=MOVE_ACC, guard=True, in_area=True, ori=None):
         """직선 이동 (끝까지 대기). guard=True 면 이동 중 힘 감시 → 충돌 시 정지.
         ori 를 주면 그 자세로, 안 주면 탐색 자세(tool_ori)로."""
         self.check_target(xyz, in_area)
@@ -453,7 +447,8 @@ class RobotIO:
         q = self.dsr.ikin(target, int(sol), ref=self.dsr.DR_BASE)
         if isinstance(q, (int, float)):        # 실패하면 -1
             raise RuntimeError(f'ikin 실패: 자세 {self.tool_ori} 를 현재 위치에서 만들 수 없음')
-        self.log(f'[자세 변경] {np.round(posx[3:], 1).tolist()} → {self.tool_ori} ({angle:.0f}° 회전, movej)')
+        self.node.get_logger().info(
+            f'[자세 변경] {np.round(posx[3:], 1).tolist()} → {self.tool_ori} ({angle:.0f}° 회전, movej)')
         self.move_j([float(v) for v in q])
 
     def amove_l(self, xyz, vel, acc, in_area=True):
@@ -463,10 +458,7 @@ class RobotIO:
                                     ref=self.dsr.DR_BASE), 'amovel', target)
 
     def stop(self):
-        req = self._MoveStop.Request()
-        req.stop_mode = self.dsr.DR_QSTOP
-        future = self.stop_cli.call_async(req)
-        rclpy.spin_until_future_complete(self.node, future, timeout_sec=2.0)
+        self.stopper.stop(self.dsr.DR_QSTOP, timeout_sec=2.0)
 
     def is_moving(self):
         return self.dsr.check_motion() != self.dsr.DR_STATE_IDLE
@@ -520,7 +512,7 @@ class RobotIO:
 
     # ---------------------------------------------------------------- 내부
     def _v(self, vel):
-        return [vel * self.speed, ROT_VEL * self.speed]
+        return [vel * self.speed, ROT_VELOCITY * self.speed]
 
     def _a(self, acc):
         return [acc * self.speed, ROT_ACC * self.speed]
@@ -574,7 +566,7 @@ class TableMarkerPublisher(WallMarkerPublisher):
 # =============================================================================
 class TableExplorer:
     def __init__(self, io, area, viz=None, dry_run=False, deep_depth=DEEP_SEARCH_DEPTH,
-                 deep_vel=DEEP_PROBE_VEL, min_z=None):
+                 deep_vel=DEEP_PROBE_VELOCITY, min_z=None):
         self.io = io
         self.area = area
         self.viz = viz
@@ -589,9 +581,6 @@ class TableExplorer:
         self.points = []
         self.safe_z = area.top_z + SAFE_HEIGHT
 
-    def log(self, msg):
-        self.io.log(msg)
-
     def update_rviz(self, model=None):
         if self.viz is None or not self.points:
             return
@@ -599,7 +588,7 @@ class TableExplorer:
             self.viz.publish([p['xyz'] for p in self.points], [p['kind'] for p in self.points],
                              plane=self.plane, model=model)
         except Exception as e:
-            self.io.warn(f'RViz 퍼블리시 실패: {e}')
+            self.io.node.get_logger().warn(f'RViz 퍼블리시 실패: {e}')
 
     def expected_z(self, x, y):
         """평면을 구했으면 평면 높이, 아니면 영역 지정 높이 (+ 첫 접촉 보정)."""
@@ -619,13 +608,14 @@ class TableExplorer:
         # 영역을 좌표로 지정했고(티칭 자세 없음) 지금 공구가 이미 아래를 보고 있으면 그 자세를 그대로 사용
         if self.area.tool_ori is None and tool_down_angle_deg(cur_ori) < 15.0:
             self.io.tool_ori = [float(v) for v in cur_ori]
-            self.log(f'[진입] 현재 공구가 아래를 보고 있어 현재 자세 {np.round(cur_ori, 1).tolist()} 를 탐색 자세로 사용')
+            self.io.node.get_logger().info(
+                f'[진입] 현재 공구가 아래를 보고 있어 현재 자세 {np.round(cur_ori, 1).tolist()} 를 탐색 자세로 사용')
         elif tool_down_angle_deg(self.io.tool_ori) > 15.0:
-            self.io.warn(f'탐색 자세 {self.io.tool_ori} 의 공구가 아래를 보지 않습니다 '
-                         f'({tool_down_angle_deg(self.io.tool_ori):.0f}° 벗어남). TOOL_ORI/티칭 자세 확인')
+            self.io.node.get_logger().warn(f'탐색 자세 {self.io.tool_ori} 의 공구가 아래를 보지 않습니다 '
+                                           f'({tool_down_angle_deg(self.io.tool_ori):.0f}° 벗어남). TOOL_ORI/티칭 자세 확인')
 
         z = max(cur[2], self.safe_z)
-        self.log(f'[진입] 수직 상승 z={z:.0f} (자세 유지) → 자세 맞춤 → 영역 위로 이동')
+        self.io.node.get_logger().info(f'[진입] 수직 상승 z={z:.0f} (자세 유지) → 자세 맞춤 → 영역 위로 이동')
         # 진입은 자세가 바뀔 수 있어 힘 영점이 맞지 않으므로 가드 없이 천천히
         self.io.move_l([cur[0], cur[1], z], guard=False, in_area=False, ori=cur_ori)
         self.io.rotate_to_tool_ori()
@@ -644,7 +634,8 @@ class TableExplorer:
     def lift(self):
         pos = self.io.get_pos()
         if pos[2] < self.safe_z - 1.0:
-            self.io.move_l([pos[0], pos[1], self.safe_z], vel=PROBE_VEL * 3, guard=False, in_area=False)
+            self.io.move_l([pos[0], pos[1], self.safe_z], vel=PROBE_VELOCITY * 3,
+                           guard=False, in_area=False)
 
     # ------------------------------------------------------------ STEP 1
     def _descend(self, x, y, z_from, z_to, vel):
@@ -668,54 +659,59 @@ class TableExplorer:
             time.sleep(SAMPLE_PERIOD)
         else:
             self.io.stop()
-            self.io.warn('  -> 시간 초과로 정지')
+            self.io.node.get_logger().warn('  -> 시간 초과로 정지')
         self.io.wait_motion_done()
         return contact, f_norm, lowest
 
     def _deep_search(self, x, y, z_from, z_to):
         """2차: 빠르게(deep_vel) 깊이 내려가 대략 위치를 찾고,
-        DEEP_BACKOFF 만큼 올라가 PROBE_VEL 로 다시 눌러 정확한 접촉점을 구한다."""
-        self.log(f'  -> 2차 탐색: z {z_from:.1f} → {max(z_to, self.min_z):.1f} ({self.deep_vel:.0f}mm/s)')
+        DEEP_BACKOFF 만큼 올라가 PROBE_VELOCITY 로 다시 눌러 정확한 접촉점을 구한다."""
+        self.io.node.get_logger().info(
+            f'  -> 2차 탐색: z {z_from:.1f} → {max(z_to, self.min_z):.1f} ({self.deep_vel:.0f}mm/s)')
         rough, f, lowest = self._descend(x, y, z_from, z_to, self.deep_vel)
         if rough is None:
             return None, f, lowest
-        self.log(f'  -> 대략 접촉 z={rough[2]:.1f} ({f:.1f}N), 정밀 측정')
+        self.io.node.get_logger().info(f'  -> 대략 접촉 z={rough[2]:.1f} ({f:.1f}N), 정밀 측정')
         top = rough[2] + DEEP_BACKOFF
-        self.io.move_l([x, y, top], vel=PROBE_VEL * 2, guard=False)
+        self.io.move_l([x, y, top], vel=PROBE_VELOCITY * 2, guard=False)
         self.io.zero_force()
-        return self._descend(x, y, top, rough[2] - DEEP_BACKOFF, PROBE_VEL)
+        return self._descend(x, y, top, rough[2] - DEEP_BACKOFF, PROBE_VELOCITY)
 
     def probe_point(self, xy):
         x, y = xy
         zg = self.expected_z(x, y)
         first = self.z_offset is None          # 아직 한 번도 안 닿음
         z_start = zg + APPROACH_GAP
-        self.log(f'[프로빙] ({x:.0f}, {y:.0f}) 예상 z={zg:.1f}' + (' (첫 점)' if first else ''))
+        self.io.node.get_logger().info(
+            f'[프로빙] ({x:.0f}, {y:.0f}) 예상 z={zg:.1f}' + (' (첫 점)' if first else ''))
         self.goto_safe(xy)
         if self.dry_run:
             return None
-        self.io.move_l([x, y, z_start], vel=DESCEND_VEL)
+        self.io.move_l([x, y, z_start], vel=DESCEND_VELOCITY)
         self.io.zero_force()
 
         # 1차: 예상 높이 근처만 천천히
-        contact, f_norm, lowest = self._descend(x, y, z_start, zg - SEARCH_DEPTH, PROBE_VEL)
+        contact, f_norm, lowest = self._descend(x, y, z_start, zg - SEARCH_DEPTH, PROBE_VELOCITY)
         if contact is None:                    # 예상보다 낮음 → 2차: 이어서 빠르고 깊게
-            self.io.warn(f'  -> 1차 {lowest:.1f}까지 접촉 없음 → 2차 탐색')
+            self.io.node.get_logger().warn(f'  -> 1차 {lowest:.1f}까지 접촉 없음 → 2차 탐색')
             contact, f_norm, lowest = self._deep_search(x, y, lowest, zg - self.deep_depth)
         self.lift()
 
         if contact is None:
             hit_floor = lowest <= self.min_z + 1.0
-            self.io.warn(f'  -> 접촉 없음: z={lowest:.1f}까지 내려감 (지정 높이보다 {zg - lowest:.0f}mm 아래). '
-                         + ('min_z 제한에 걸림 → min_z 를 낮추세요' if hit_floor
-                            else 'table_z/티칭 높이가 실제와 맞는지, deep_depth 확인'))
+            self.io.node.get_logger().warn(
+                f'  -> 접촉 없음: z={lowest:.1f}까지 내려감 (지정 높이보다 {zg - lowest:.0f}mm 아래). '
+                + ('min_z 제한에 걸림 → min_z 를 낮추세요' if hit_floor
+                   else 'table_z/티칭 높이가 실제와 맞는지, deep_depth 확인'))
             return None
-        self.log(f'  -> 접촉 z={contact[2]:.2f} (예상 대비 {contact[2] - zg:+.2f}mm), 힘 {f_norm:.2f}N')
+        self.io.node.get_logger().info(
+            f'  -> 접촉 z={contact[2]:.2f} (예상 대비 {contact[2] - zg:+.2f}mm), 힘 {f_norm:.2f}N')
         if first:
             self.z_offset = float(contact[2] - self.area.guess_z(x, y))
-            self.log(f'  -> 첫 접촉: 지정 높이 대비 {self.z_offset:+.2f}mm → 이후 예상 높이에 반영')
+            self.io.node.get_logger().info(
+                f'  -> 첫 접촉: 지정 높이 대비 {self.z_offset:+.2f}mm → 이후 예상 높이에 반영')
         if contact[2] - zg > OBJECT_WARN:
-            self.io.warn('  -> 예상보다 많이 높음: 상판 위 물체일 수 있음 (모델링에서 이상치로 처리)')
+            self.io.node.get_logger().warn('  -> 예상보다 많이 높음: 상판 위 물체일 수 있음 (모델링에서 이상치로 처리)')
         self.points.append({'kind': 'probe', 'xyz': contact.tolist(), 'force': f_norm})
         self.update_rviz()
         return contact
@@ -727,14 +723,16 @@ class TableExplorer:
             raise RuntimeError(f'접촉점이 {len(pts)}개뿐이라 평면을 만들 수 없습니다')
         self.plane = table_plane(pts)
         p = self.plane
-        self.log('=== 상판 평면 계산 완료 ===')
-        self.log(f'  중심 높이 z={p["centroid"][2]:.2f}mm, 기울기 {p["tilt_deg"]:.3f}°, RMS {p["rms"]:.3f}mm')
+        self.io.node.get_logger().info('=== 상판 평면 계산 완료 ===')
+        self.io.node.get_logger().info(
+            f'  중심 높이 z={p["centroid"][2]:.2f}mm, 기울기 {p["tilt_deg"]:.3f}°, RMS {p["rms"]:.3f}mm')
         self.update_rviz()
 
     # ------------------------------------------------------------ STEP 3
     def sliding_scan(self, xy0, xy1, kind):
         name = '가로' if kind == 'scan_h' else '세로'
-        self.log(f'[슬라이딩-{name}] ({xy0[0]:.0f}, {xy0[1]:.0f}) → ({xy1[0]:.0f}, {xy1[1]:.0f})')
+        self.io.node.get_logger().info(
+            f'[슬라이딩-{name}] ({xy0[0]:.0f}, {xy0[1]:.0f}) → ({xy1[0]:.0f}, {xy1[1]:.0f})')
         self.goto_safe(xy0)
         if self.dry_run:
             self.goto_safe(xy1)
@@ -742,18 +740,19 @@ class TableExplorer:
         n = self._sliding_virtual(xy0, xy1, kind) if self.io.mode == 'virtual' \
             else self._sliding_real(xy0, xy1, kind)
         self.update_rviz()
-        self.log(f'  -> {n}개 점 기록')
+        self.io.node.get_logger().info(f'  -> {n}개 점 기록')
 
     def _sliding_virtual(self, xy0, xy1, kind):
         table = self.io.virtual_table
         press = SCAN_FORCE / VIRTUAL_TABLE['stiffness']
         p0, p1 = np.asarray(xy0, float), np.asarray(xy1, float)
         steps = max(int(round(np.linalg.norm(p1 - p0) / SCAN_STEP)), 1)
-        self.io.move_l([*p0, table.surface_z(*p0) + APPROACH_GAP], vel=DESCEND_VEL)
+        self.io.move_l([*p0, table.surface_z(*p0) + APPROACH_GAP], vel=DESCEND_VELOCITY)
         count = 0
         for t in np.linspace(0.0, 1.0, steps + 1):
             x, y = p0 + t * (p1 - p0)
-            self.io.move_l([x, y, table.surface_z(x, y) - press], vel=SCAN_VEL, acc=SCAN_ACC, guard=False)
+            self.io.move_l([x, y, table.surface_z(x, y) - press], vel=SCAN_VELOCITY, acc=SCAN_ACC,
+                           guard=False)
             pos = self.io.get_pos()
             f = float(np.linalg.norm(self.io.get_force(pos)[:3]))
             self.points.append({'kind': kind, 'xyz': pos.tolist(), 'force': f})
@@ -764,9 +763,9 @@ class TableExplorer:
 
     def _sliding_real(self, xy0, xy1, kind):
         z0, z1 = self.expected_z(*xy0), self.expected_z(*xy1)
-        self.io.move_l([xy0[0], xy0[1], z0 + APPROACH_GAP], vel=DESCEND_VEL)
+        self.io.move_l([xy0[0], xy0[1], z0 + APPROACH_GAP], vel=DESCEND_VELOCITY)
         self.io.zero_force()
-        self.io.move_l([xy0[0], xy0[1], z0 + 10.0], vel=PROBE_VEL * 2)
+        self.io.move_l([xy0[0], xy0[1], z0 + 10.0], vel=PROBE_VELOCITY * 2)
         count = 0
         try:
             self.io.start_press(SCAN_FORCE)
@@ -775,7 +774,7 @@ class TableExplorer:
                 if time.time() - t0 > 5.0:
                     raise RuntimeError('힘 제어로 상판에 닿지 못함 (평면 높이 확인)')
                 time.sleep(SAMPLE_PERIOD)
-            self.io.amove_l([xy1[0], xy1[1], z1], SCAN_VEL, SCAN_ACC)
+            self.io.amove_l([xy1[0], xy1[1], z1], SCAN_VELOCITY, SCAN_ACC)
             t0 = time.time()
             while time.time() - t0 < 0.5 or self.io.is_moving():
                 pos = self.io.get_pos()
@@ -810,13 +809,16 @@ class TableExplorer:
                     diffs.append(hh[:, 2].mean() - vv[:, 2].mean())
         if diffs:
             d = np.abs(diffs)
-            self.log(f'[교차점 점검] {len(d)}곳, 가로-세로 Z 차이 평균 {d.mean():.3f}mm, 최대 {d.max():.3f}mm')
+            self.io.node.get_logger().info(
+                f'[교차점 점검] {len(d)}곳, 가로-세로 Z 차이 평균 {d.mean():.3f}mm, 최대 {d.max():.3f}mm')
 
     # ------------------------------------------------------------ 전체
     def run_pipeline(self):
         a = self.area
-        self.log(f'=== 상판 탐색 시작 (mode={self.io.mode}, dry_run={self.dry_run}, speed={self.io.speed}) ===')
-        self.log(f'  영역 {a.len_s:.0f} x {a.len_t:.0f} mm, 안전 높이 z={self.safe_z:.0f}')
+        self.io.node.get_logger().info(
+            f'=== 상판 탐색 시작 (mode={self.io.mode}, dry_run={self.dry_run}, speed={self.io.speed}) ===')
+        self.io.node.get_logger().info(
+            f'  영역 {a.len_s:.0f} x {a.len_t:.0f} mm, 안전 높이 z={self.safe_z:.0f}')
         if self.viz is not None:
             self.viz.clear()
             self.viz.publish_area(a)
@@ -834,17 +836,17 @@ class TableExplorer:
             self.calculate_plane()
 
         # STEP 3: 가로(s 방향) / 세로(t 방향) 슬라이딩, 지그재그
-        self.log('=== 가로 슬라이딩 스캔 ===')
+        self.io.node.get_logger().info('=== 가로 슬라이딩 스캔 ===')
         for i, t in enumerate(SCAN_ROWS):
             s0, s1 = (0, 1) if i % 2 == 0 else (1, 0)
             self.sliding_scan(a.point(s0, t), a.point(s1, t), 'scan_h')
-        self.log('=== 세로 슬라이딩 스캔 ===')
+        self.io.node.get_logger().info('=== 세로 슬라이딩 스캔 ===')
         for i, s in enumerate(SCAN_COLS):
             t0, t1 = (0, 1) if i % 2 == 0 else (1, 0)
             self.sliding_scan(a.point(s, t0), a.point(s, t1), 'scan_v')
 
         self.check_crossings()
-        self.log('=== 탐색 완료 ===')
+        self.io.node.get_logger().info('=== 탐색 완료 ===')
 
     def save(self):
         os.makedirs(SAVE_DIR, exist_ok=True)
@@ -865,7 +867,7 @@ class TableExplorer:
         }
         with open(path, 'w') as f:
             json.dump(data, f, indent=2, ensure_ascii=False)
-        self.log(f'탐색 데이터 저장: {path} ({len(self.points)}개 점)')
+        self.io.node.get_logger().info(f'탐색 데이터 저장: {path} ({len(self.points)}개 점)')
         return path
 
 
@@ -1138,7 +1140,7 @@ def main(args=None):
     speed = float(node.declare_parameter('speed', 1.0, num).value)
     dry_run = node.declare_parameter('dry_run', False).value
     deep_depth = float(node.declare_parameter('deep_depth', DEEP_SEARCH_DEPTH, num).value)
-    deep_vel = float(node.declare_parameter('deep_vel', DEEP_PROBE_VEL, num).value)
+    deep_vel = float(node.declare_parameter('deep_vel', DEEP_PROBE_VELOCITY, num).value)
     min_z_v = node.declare_parameter('min_z', '', num).value     # 절대 최저 높이 [mm] (BASE)
     min_z = float(min_z_v) if str(min_z_v).strip() else None
     run_modeling = node.declare_parameter('modeling', True).value
@@ -1151,24 +1153,23 @@ def main(args=None):
     frame_id = node.declare_parameter('frame_id', 'base_link').value
     file_s = node.declare_parameter('file', '').value
 
-    def shutdown():
-        node.destroy_node()
-        if rclpy.ok():
-            rclpy.shutdown()
-
     if task == 'model':
         try:
             model_from_file(file_s or latest_scan_file(), show=show_plot)
         except Exception as e:
             node.get_logger().error(f'모델링 실패: {e}')
-        shutdown()
+        safe_shutdown(node)
         return
     if task not in ('teach', 'explore') or mode not in ('virtual', 'real'):
         node.get_logger().error(f'task(teach/explore/model)={task}, mode(virtual/real)={mode} 확인')
-        shutdown()
+        safe_shutdown(node)
         return
 
-    import DSR_ROBOT2 as dsr
+    try:
+        import DSR_ROBOT2 as dsr
+    except ImportError as e:
+        node.get_logger().info(f'Error importing DSR_ROBOT2 : {e}')
+        return
     io = RobotIO(node, dsr, mode, speed)
     io.wait_for_services()
 
@@ -1181,7 +1182,7 @@ def main(args=None):
             do_teach(io)
         except Exception as e:
             node.get_logger().error(f'티칭 실패: {e}')
-        shutdown()
+        safe_shutdown(node)
         return
 
     # ---------------------------------------------------------------- explore
@@ -1189,7 +1190,7 @@ def main(args=None):
         area = load_area(node)
     except Exception as e:
         node.get_logger().error(f'영역 설정 오류: {e}')
-        shutdown()
+        safe_shutdown(node)
         return
     io.area = area
     if area.tool_ori is not None:
@@ -1200,9 +1201,9 @@ def main(args=None):
     viz = TableMarkerPublisher(node, topic='table_markers', frame_id=frame_id) if use_rviz else None
     explorer = TableExplorer(io, area, viz, dry_run=dry_run, deep_depth=deep_depth,
                              deep_vel=deep_vel, min_z=min_z)
-    io.log(f'2차 탐색: {deep_vel:.0f}mm/s, 예상 높이 -{deep_depth:.0f}mm 까지, '
-           f'최저 높이 제한 min_z={explorer.min_z:.1f}mm')
-    io.log(f'영역: {area.source}, 모서리 {np.round(area.corners, 1).tolist()}')
+    node.get_logger().info(f'2차 탐색: {deep_vel:.0f}mm/s, 예상 높이 -{deep_depth:.0f}mm 까지, '
+                           f'최저 높이 제한 min_z={explorer.min_z:.1f}mm')
+    node.get_logger().info(f'영역: {area.source}, 모서리 {np.round(area.corners, 1).tolist()}')
 
     if mode == 'real':
         cur = io.get_posx()
@@ -1211,8 +1212,8 @@ def main(args=None):
               f'speed={io.speed}, dry_run={dry_run}')
         print('       진입: 수직 상승 → 안전 높이로 영역 위까지 수평 이동 (진입 중엔 자세도 바뀜)')
         if input('       주변 물체 확인 후 y 입력: ').strip().lower() != 'y':
-            io.log('취소했습니다.')
-            shutdown()
+            node.get_logger().info('취소했습니다.')
+            safe_shutdown(node)
             return
 
     saved = None
@@ -1220,32 +1221,34 @@ def main(args=None):
         io.setup(collision_sensitivity)
         explorer.run_pipeline()
     except KeyboardInterrupt:
-        io.log('사용자 중단 (Ctrl+C)')
+        node.get_logger().info('사용자 중단 (Ctrl+C)')
         io.stop()
     except Exception as e:
         node.get_logger().error(f'에러: {e}')
         io.stop()
         io.diagnose()
     finally:
-        try:
-            io.release_press()
-        except Exception as e:
-            node.get_logger().error(f'힘 제어 해제 실패: {e}')
-        if io.is_safe_stopped():
-            io.warn('안전정지 상태라 상승/홈 복귀를 하지 않습니다 (해제 후 수동으로 이동)')
-            go_home = False
-        else:
-            try:
+        def lift():
+            nonlocal go_home
+            if io.is_safe_stopped():
+                node.get_logger().warn('안전정지 상태라 상승/홈 복귀를 하지 않습니다 (해제 후 수동으로 이동)')
+                go_home = False
+            else:
                 explorer.lift()             # 그 자리에서 수직으로만 올라감
-            except Exception as e:
-                node.get_logger().error(f'상승 실패: {e}')
-        if explorer.points:
-            saved = explorer.save()
-        if go_home:
-            try:
+
+        def save_points():
+            nonlocal saved
+            if explorer.points:
+                saved = explorer.save()
+
+        def move_home():
+            if go_home:
                 io.move_j(HOME_J)
-            except Exception as e:
-                node.get_logger().error(f'홈 복귀 실패: {e}')
+
+        run_cleanups(node, ('힘 제어 해제 실패', io.release_press),
+                     ('상승 실패', lift),
+                     ('데이터 저장 실패', save_points),
+                     ('홈 복귀 실패', move_home))
 
     try:
         if saved and run_modeling and len(explorer.points) >= 4:
@@ -1253,7 +1256,7 @@ def main(args=None):
     except Exception as e:
         node.get_logger().error(f'모델링 실패: {e}')
     finally:
-        shutdown()
+        safe_shutdown(node)
 
 
 if __name__ == '__main__':

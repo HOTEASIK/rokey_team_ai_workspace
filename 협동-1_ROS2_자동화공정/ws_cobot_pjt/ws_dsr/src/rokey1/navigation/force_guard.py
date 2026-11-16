@@ -59,7 +59,7 @@ STATE_CHECK_PERIOD = 0.2    # [s] 로봇 상태 확인 주기
 SENSOR_FAIL_LIMIT = 3       # 연속 읽기 실패 허용 횟수
 MAX_TOOL_COLLISIONS = 2     # 툴 충돌이 연속 이만큼이면 전체 중단
 RELIEVE_MM = 20.0           # 툴 충돌 후 후퇴 거리
-RELIEVE_VEL = 15.0          # 후퇴 속도 [mm/s]
+RELIEVE_VELOCITY = 15.0          # 후퇴 속도 [mm/s]
 CLEAR_FORCE = 5.0           # 후퇴 후 툴 힘이 이 아래로 ...
 CLEAR_TORQUE = 1.0          # ... 모멘트가 이 아래로
 CLEAR_HOLD = 0.5            # ... 이 시간 동안 유지되면 '힘이 빠졌다' [s]
@@ -192,7 +192,7 @@ class ForceGuard:
         d = self.io.dsr
         for cli in (d._ros2_get_external_torque, d._ros2_get_robot_state, d._ros2_get_last_alarm):
             if not cli.wait_for_service(timeout_sec=3.0):
-                self.io.log(f'[가드] 서비스 없음: {cli.srv_name}')
+                self.io.node.get_logger().info(f'[가드] 서비스 없음: {cli.srv_name}')
                 if cli is d._ros2_get_external_torque:
                     self.arm_ok = False
                 if cli is d._ros2_get_robot_state:
@@ -210,10 +210,11 @@ class ForceGuard:
             time.sleep(0.01)
         if vals:
             self.torque_bias = np.mean(vals, axis=0)
-            self.io.log(f'[가드] 관절 토크 영점: {np.round(self.torque_bias, 2).tolist()}')
+            self.io.node.get_logger().info(
+                f'[가드] 관절 토크 영점: {np.round(self.torque_bias, 2).tolist()}')
         else:
             self.arm_ok = False
-            self.io.log('[가드] 관절 외력 토크를 읽을 수 없음 → 암 충돌 감시 끔 (컨트롤러 감지만 사용)')
+            self.io.node.get_logger().info('[가드] 관절 외력 토크를 읽을 수 없음 → 암 충돌 감시 끔 (컨트롤러 감지만 사용)')
 
     # ------------------------------------------------------------ 메인 검사
     def check(self, pos=None, wrench=None, expected=(), context=''):
@@ -269,11 +270,11 @@ class ForceGuard:
             pos = io.get_pos()
             d = np.asarray(retreat_dir, float)
             d = d / np.linalg.norm(d)
-            io.log(f'[가드] 후퇴 {dist:.0f}mm (방향 {np.round(d, 2).tolist()})')
-            io.move_l_unguarded(pos + d * dist, vel=RELIEVE_VEL)
+            io.node.get_logger().info(f'[가드] 후퇴 {dist:.0f}mm (방향 {np.round(d, 2).tolist()})')
+            io.move_l_unguarded(pos + d * dist, vel=RELIEVE_VELOCITY)
             return True
         except Exception as e:
-            io.log(f'[가드] 후퇴 실패: {e}')
+            io.node.get_logger().info(f'[가드] 후퇴 실패: {e}')
             return False
 
     def wait_clear(self, timeout=CLEAR_TIMEOUT):
@@ -290,14 +291,16 @@ class ForceGuard:
                 if fn < CLEAR_FORCE and mn < CLEAR_TORQUE:
                     t_ok = t_ok or time.time()
                     if time.time() - t_ok >= CLEAR_HOLD:
-                        self.io.log(f'[가드] 힘이 빠짐 (힘 {fn:.1f}N, 모멘트 {mn:.2f}Nm) → 계속')
+                        self.io.node.get_logger().info(
+                            f'[가드] 힘이 빠짐 (힘 {fn:.1f}N, 모멘트 {mn:.2f}Nm) → 계속')
                         return True
                 else:
                     t_ok = None
             else:
                 t_ok = None
             time.sleep(0.02)
-        self.io.log(f'[가드] {timeout:.0f}초 동안 힘이 안 빠짐 (힘 {fn:.1f}N, 모멘트 {mn:.2f}Nm)')
+        self.io.node.get_logger().info(
+            f'[가드] {timeout:.0f}초 동안 힘이 안 빠짐 (힘 {fn:.1f}N, 모멘트 {mn:.2f}Nm)')
         return False
 
     def last_alarm(self):
@@ -342,8 +345,8 @@ class ForceGuard:
         ratio = max(fn / hard, sn / SIDE_LIMIT, mn / TORQUE_LIMIT)
         if ratio >= WARN_RATIO and time.time() - self._t_warn > 1.0:
             self._t_warn = time.time()
-            self.io.log(f'[가드] 경고: 힘 {fn:.1f}N / 옆 {sn:.1f}N / 모멘트 {mn:.2f}Nm '
-                        f'(상한의 {ratio * 100:.0f}%, {context})')
+            self.io.node.get_logger().info(f'[가드] 경고: 힘 {fn:.1f}N / 옆 {sn:.1f}N / 모멘트 {mn:.2f}Nm '
+                                           f'(상한의 {ratio * 100:.0f}%, {context})')
 
     def _check_arm(self, w, context, pos):
         raw = self._read_ext_raw()

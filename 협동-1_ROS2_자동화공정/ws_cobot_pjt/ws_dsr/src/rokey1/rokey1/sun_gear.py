@@ -32,6 +32,9 @@
 import rclpy
 import DR_init
 
+from utils.service_waiter import ServiceWaiter
+from utils.shutdown import safe_shutdown
+
 # =============================================================================
 # 로봇 / 공구 설정
 # =============================================================================
@@ -141,10 +144,6 @@ def main(args=None):
         # ---------------------------------------------------------------------
         # 공통 헬퍼
         # ---------------------------------------------------------------------
-        def log(msg):
-            """ROS 로거로 정보 메시지 출력."""
-            node.get_logger().info(msg)
-
         def command(name, fn, *args, **kwargs):
             """로봇 명령을 실행하는 공통 함수.
 
@@ -153,7 +152,7 @@ def main(args=None):
               음수가 나오면 예외를 발생시켜 프로그램을 멈춘다.
             """
             if DRY_RUN:
-                log(f'[DRY RUN] {name}: args={args}, kwargs={kwargs}')
+                node.get_logger().info(f'[DRY RUN] {name}: args={args}, kwargs={kwargs}')
                 return None
             result = fn(*args, **kwargs)
             if isinstance(result, (int, float)) and not isinstance(result, bool) and result < 0:
@@ -187,9 +186,7 @@ def main(args=None):
                 ]
             if ENABLE_PERIODIC:
                 clients.append(robot._ros2_move_periodic)
-            for cli in clients:
-                while not cli.wait_for_service(timeout_sec=1.0):
-                    log(f'Waiting for service {cli.srv_name} ...')
+            ServiceWaiter(node).wait(*clients)
 
         # ---------------------------------------------------------------------
         # 이동
@@ -216,7 +213,7 @@ def main(args=None):
         # ---------------------------------------------------------------------
         def gripper_close():
             if not ENABLE_GRIPPER:
-                log('Gripper CLOSE skipped (ENABLE_GRIPPER=False)')
+                node.get_logger().info('Gripper CLOSE skipped (ENABLE_GRIPPER=False)')
                 return
             command('digital output 1 ON', robot.set_digital_output, 1, 1)
             command('digital output 2 OFF', robot.set_digital_output, 2, 0)
@@ -224,7 +221,7 @@ def main(args=None):
 
         def gripper_open():
             if not ENABLE_GRIPPER:
-                log('Gripper OPEN skipped (ENABLE_GRIPPER=False)')
+                node.get_logger().info('Gripper OPEN skipped (ENABLE_GRIPPER=False)')
                 return
             command('digital output 1 OFF', robot.set_digital_output, 1, 0)
             command('digital output 2 ON', robot.set_digital_output, 2, 1)
@@ -251,11 +248,12 @@ def main(args=None):
             """
             nonlocal force_active, compliance_active
             if DRY_RUN:
-                log(f'[DRY RUN] force stage {target_n}N for {hold_sec}s')
+                node.get_logger().info(f'[DRY RUN] force stage {target_n}N for {hold_sec}s')
                 return
             if not force_enabled:
                 # 시뮬레이션 / 힘 제어 꺼짐: 누르지 않고 순서와 시간만 재현한다
-                log(f'Force stage {target_n}N SKIPPED ({"simulation" if sim else "ENABLE_FORCE=False"}), '
+                node.get_logger().info(
+                    f'Force stage {target_n}N SKIPPED ({"simulation" if sim else "ENABLE_FORCE=False"}), '
                     f'waiting {hold_sec}s instead')
                 if grip_while_pressing:
                     gripper_open()
@@ -287,7 +285,8 @@ def main(args=None):
                 robot.wait(hold_sec)
                 if LOG_TOOL_FORCE:
                     # PICK_FORCE_RATIO 를 정하기 위한 실측값 출력
-                    log(f'Tool force @ {target_n}N stage: {robot.get_tool_force(robot.DR_TOOL)}')
+                    node.get_logger().info(
+                        f'Tool force @ {target_n}N stage: {robot.get_tool_force(robot.DR_TOOL)}')
                 if check and check_enabled:
                     # 목표 힘 크기에 비례해서 범위를 정한다 (누르는 힘을 바꿔도 따라감)
                     fmin = round(abs(target_n) * PICK_FORCE_RATIO[0], 1)
@@ -317,7 +316,7 @@ def main(args=None):
         # ---------------------------------------------------------------------
         def pick_place_joint(index, pick, retreat, place):
             """1~3번 작업: 관절 좌표로 pick & place."""
-            log(f'Pick & Place {index} start')
+            node.get_logger().info(f'Pick & Place {index} start')
             gripper_close()                     # 원본 DART 순서 그대로: 접근 전에 닫기
             move_joint(pick)                    # 집는 위치 위로 이동
             # 50N 으로 누르면서 내려가는 중에 열기→닫기로 집고, 2초 유지 후 힘 검사
@@ -327,11 +326,11 @@ def main(args=None):
             apply_force(-80.0, 5.0)             # 80N 으로 5초 눌러 끼우기
             gripper_open()                      # 그리퍼 열어서 놓기
             move_joint(place)                   # 놓는 위치(접근 자세)로 복귀
-            log(f'Pick & Place {index} complete')
+            node.get_logger().info(f'Pick & Place {index} complete')
 
         def pick_place4():
             """4번 작업: 직교 좌표로 pick & place + 손목 흔들어 끼우기."""
-            log('Pick & Place 4 start')
+            node.get_logger().info('Pick & Place 4 start')
             pick, retreat, place, post_place = CART_TASK
             gripper_close()
             move_linear(pick)
@@ -348,19 +347,20 @@ def main(args=None):
                     atime=0.0, repeat=3, ref=robot.DR_TOOL,
                 )
             else:
-                log('Periodic wrist motion SKIPPED (ENABLE_PERIODIC=False or DRY_RUN)')
+                node.get_logger().info(
+                    'Periodic wrist motion SKIPPED (ENABLE_PERIODIC=False or DRY_RUN)')
             gripper_open()
             # [경고] 원본 코드는 그리퍼를 연 '뒤에' Z 150mm → 98.57mm 로 '내려간다'.
             #        의도한 동작인지 확인할 것 (보통은 놓은 뒤 위로 빠짐).
             move_linear(post_place)
-            log('Pick & Place 4 complete')
+            node.get_logger().info('Pick & Place 4 complete')
 
         # ---------------------------------------------------------------------
         # 초기 설정
         # ---------------------------------------------------------------------
         if DRY_RUN:
-            log('DRY_RUN=True: no motion, I/O or mode changes will be sent')
-            log(f'[DRY RUN] set_tool({TOOL_NAME!r}), set_tcp({TCP_NAME!r})')
+            node.get_logger().info('DRY_RUN=True: no motion, I/O or mode changes will be sent')
+            node.get_logger().info(f'[DRY RUN] set_tool({TOOL_NAME!r}), set_tcp({TCP_NAME!r})')
         else:
             wait_for_services()
             # Tool / TCP 는 MANUAL 모드에서만 바꿀 수 있다.
@@ -390,13 +390,13 @@ def main(args=None):
         # 메인 루프: 홈 → 1~3번(관절) → 4번(직교) → 홈
         # ---------------------------------------------------------------------
         for cycle in range(REPEAT_COUNT):
-            log(f'Cycle {cycle + 1}/{REPEAT_COUNT}')
+            node.get_logger().info(f'Cycle {cycle + 1}/{REPEAT_COUNT}')
             move_joint(HOME)
             for index, poses in enumerate(JOINT_TASKS, start=1):
                 pick_place_joint(index, *poses)
             pick_place4()
             move_joint(HOME)
-        log('All cycles complete')
+        node.get_logger().info('All cycles complete')
 
     except Exception as exc:
         # 어떤 에러든 로그를 남기고 다시 던져서 비정상 종료 코드로 끝낸다.
@@ -405,23 +405,17 @@ def main(args=None):
         raise
     finally:
         # 힘 제어가 켜진 채로 프로그램이 끝나지 않도록 마지막으로 한 번 더 해제한다.
-        # (해제 중 에러는 무시: 이미 종료 중이므로 원래 에러를 덮지 않기 위함)
-        if robot is not None:
-            if force_active:
-                try:
-                    robot.release_force(time=0.0)
-                except Exception:
-                    pass
-            if compliance_active:
-                try:
-                    robot.release_compliance_ctrl()
-                except Exception:
-                    pass
-        # ROS 2 노드 정리
-        if node is not None:
-            node.destroy_node()
-        if rclpy.ok():
-            rclpy.shutdown()
+        # (해제 중 에러는 로그만 남김: 이미 종료 중이므로 원래 에러를 덮지 않기 위함)
+        def release_force():
+            if robot is not None and force_active:
+                robot.release_force(time=0.0)
+
+        def release_compliance():
+            if robot is not None and compliance_active:
+                robot.release_compliance_ctrl()
+
+        safe_shutdown(node, ('Failed to release force', release_force),
+                      ('Failed to release compliance', release_compliance))
 
 
 if __name__ == '__main__':

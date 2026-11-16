@@ -49,7 +49,7 @@
   - WALL_GUESS_X : 실제 벽 위치보다 '조금 앞'으로 대략 맞출 것 (줄자로 측정)
   - GRID_Y/GRID_Z/SCAN_* : 벽 범위 안쪽인지, 로봇 작업 영역 안인지
   - READY_J 자세에서 공구가 +X(벽 방향)를 바라보는지 (티칭 펜던트로 확인)
-  - 처음엔 PROBE_VEL 을 낮게, FORCE_THRESHOLD 를 작게 (공구/벽 보호)
+  - 처음엔 PROBE_VELOCITY 을 낮게, FORCE_THRESHOLD 를 작게 (공구/벽 보호)
 """
 import json
 import os
@@ -60,6 +60,10 @@ from datetime import datetime
 import numpy as np
 import rclpy
 import DR_init
+
+from utils.move_stop import MoveStopClient
+from utils.service_waiter import ServiceWaiter
+from utils.shutdown import run_cleanups, safe_shutdown
 
 # 같은 폴더의 모델링 모듈 (ros2 run 으로 실행할 때 / python3 로 직접 실행할 때 모두 지원)
 try:
@@ -120,10 +124,10 @@ RVIZ_EVERY = 10                     # (real) 슬라이딩 중 N 개 점마다 RV
 # =============================================================================
 # 속도 / 힘 설정
 # =============================================================================
-MOVE_VEL, MOVE_ACC = 100.0, 200.0   # 일반 이동 속도 [mm/s], 가속도 [mm/s^2]
-PROBE_VEL, PROBE_ACC = 10.0, 50.0   # 벽 쪽으로 '더듬는' 속도 (느릴수록 정확/안전)
-SCAN_VEL, SCAN_ACC = 20.0, 50.0     # 슬라이딩 속도
-JOINT_VEL, JOINT_ACC = 30.0, 30.0   # 관절 이동 속도 [deg/s]
+MOVE_VELOCITY, MOVE_ACC = 100.0, 200.0   # 일반 이동 속도 [mm/s], 가속도 [mm/s^2]
+PROBE_VELOCITY, PROBE_ACC = 10.0, 50.0   # 벽 쪽으로 '더듬는' 속도 (느릴수록 정확/안전)
+SCAN_VELOCITY, SCAN_ACC = 20.0, 50.0     # 슬라이딩 속도
+JOINT_VELOCITY, JOINT_ACC = 30.0, 30.0   # 관절 이동 속도 [deg/s]
 
 FORCE_THRESHOLD = 5.0               # 접촉 판정 힘 [N] (이 이상이면 '닿았다')
 SCAN_FORCE = 8.0                    # 슬라이딩 때 벽을 누르는 힘 [N]
@@ -190,27 +194,20 @@ class RobotIO:
         self.compliance_on = False
 
         # DSR_ROBOT2 에는 '정지(stop)' 함수가 없어서 서비스를 직접 만든다
-        from dsr_msgs2.srv import MoveStop
-        self._MoveStop = MoveStop
-        self.stop_cli = node.create_client(MoveStop, 'dsr_controller2/motion/move_stop')
+        self.stopper = MoveStopClient(node)
 
     # ---------------------------------------------------------------- 기본
-    def log(self, msg):
-        self.node.get_logger().info(msg)
-
     def wait_for_services(self):
         """사용할 서비스가 모두 뜰 때까지 대기 (안 하면 첫 호출에서 멈출 수 있음)."""
         d = self.dsr
         clients = [d._ros2_set_robot_mode, d._ros2_movej, d._ros2_movel,
-                   d._ros2_get_current_posx, d._ros2_check_motion, self.stop_cli]
+                   d._ros2_get_current_posx, d._ros2_check_motion, self.stopper.cli]
         if self.mode == 'real':
             clients += [d._ros2_set_current_tool, d._ros2_set_current_tcp,
                         d._ros2_get_tool_force, d._ros2_set_ref_coord,
                         d._ros2_task_compliance_ctrl, d._ros2_set_desired_force,
                         d._ros2_release_force, d._ros2_release_compliance_ctrl]
-        for cli in clients:
-            while not cli.wait_for_service(timeout_sec=1.0):
-                self.log(f'서비스 대기 중: {cli.srv_name}')
+        ServiceWaiter(self.node).wait(*clients)
 
     def setup(self):
         """로봇 모드/공구 설정."""
@@ -224,9 +221,9 @@ class RobotIO:
 
     # ---------------------------------------------------------------- 이동
     def move_j(self, q):
-        self._check(self.dsr.movej(self.dsr.posj(*q), vel=JOINT_VEL, acc=JOINT_ACC), 'movej')
+        self._check(self.dsr.movej(self.dsr.posj(*q), vel=JOINT_VELOCITY, acc=JOINT_ACC), 'movej')
 
-    def move_l(self, xyz, vel=MOVE_VEL, acc=MOVE_ACC):
+    def move_l(self, xyz, vel=MOVE_VELOCITY, acc=MOVE_ACC):
         """직선 이동 (끝날 때까지 기다림). xyz 만 주면 자세는 TOOL_ORI 사용."""
         self._check(self.dsr.movel(self._posx(xyz), vel=[vel, 30.0], acc=[acc, 60.0],
                                    ref=self.dsr.DR_BASE), 'movel')
@@ -238,10 +235,7 @@ class RobotIO:
 
     def stop(self):
         """즉시 정지 (Quick stop, 정지 카테고리 2)."""
-        req = self._MoveStop.Request()
-        req.stop_mode = self.dsr.DR_QSTOP
-        future = self.stop_cli.call_async(req)
-        rclpy.spin_until_future_complete(self.node, future, timeout_sec=2.0)
+        self.stopper.stop(self.dsr.DR_QSTOP, timeout_sec=2.0)
 
     def is_moving(self):
         return self.dsr.check_motion() != self.dsr.DR_STATE_IDLE
@@ -317,9 +311,6 @@ class HybridWallExplorer:
         # [{'kind': 'probe'|'scan_h'|'scan_v', 'xyz': [x,y,z], 'force': N}, ...]
         self.points = []
 
-    def log(self, msg):
-        self.io.log(msg)
-
     def update_rviz(self, model=None):
         """지금까지 모은 점 (+ 평면/모델) 을 RViz 로 보낸다. 실패해도 탐색은 계속."""
         if self.viz is None or not self.points:
@@ -343,11 +334,11 @@ class HybridWallExplorer:
         """
         start = [WALL_GUESS_X - APPROACH_GAP, y, z]
         end = [WALL_GUESS_X + SEARCH_DEPTH, y, z]
-        self.log(f'[프로빙] y={y:.0f}, z={z:.0f} 탐색 시작')
+        self.io.node.get_logger().info(f'[프로빙] y={y:.0f}, z={z:.0f} 탐색 시작')
 
         self.io.move_l(start)
         self.io.zero_force()                  # 닿기 전에 영점 잡기
-        self.io.amove_l(end, PROBE_VEL, PROBE_ACC)
+        self.io.amove_l(end, PROBE_VELOCITY, PROBE_ACC)
 
         contact, f_norm = None, 0.0
         t0 = time.time()
@@ -364,15 +355,16 @@ class HybridWallExplorer:
             time.sleep(SAMPLE_PERIOD)
         else:
             self.io.stop()
-            self.log('  -> 시간 초과로 정지')
+            self.io.node.get_logger().info('  -> 시간 초과로 정지')
 
         self.io.wait_motion_done()
-        self.io.move_l(start, vel=PROBE_VEL * 3)   # 벽에서 떨어지기 (후퇴)
+        self.io.move_l(start, vel=PROBE_VELOCITY * 3)   # 벽에서 떨어지기 (후퇴)
 
         if contact is None:
-            self.log('  -> 접촉 없음 (WALL_GUESS_X / SEARCH_DEPTH 확인)')
+            self.io.node.get_logger().info('  -> 접촉 없음 (WALL_GUESS_X / SEARCH_DEPTH 확인)')
             return None
-        self.log(f'  -> 접촉! 위치 [{contact[0]:.2f}, {contact[1]:.2f}, {contact[2]:.2f}], 힘 {f_norm:.2f}N')
+        self.io.node.get_logger().info(
+            f'  -> 접촉! 위치 [{contact[0]:.2f}, {contact[1]:.2f}, {contact[2]:.2f}], 힘 {f_norm:.2f}N')
         self.points.append({'kind': 'probe', 'xyz': contact.tolist(), 'force': f_norm})
         self.update_rviz()
         return contact
@@ -385,10 +377,11 @@ class HybridWallExplorer:
             raise RuntimeError(f'접촉점이 {len(pts)}개뿐이라 평면을 만들 수 없습니다')
         plane = fit_plane(pts)
         n = plane['normal']
-        self.log('=== 평면 계산 완료 ===')
-        self.log(f'  법선 벡터: [{n[0]:.4f}, {n[1]:.4f}, {n[2]:.4f}]')
-        self.log(f'  평면식  : {n[0]:.4f}x + {n[1]:.4f}y + {n[2]:.4f}z + {plane["d"]:.2f} = 0')
-        self.log(f'  평탄도  : RMS {plane["rms"]:.3f} mm')
+        self.io.node.get_logger().info('=== 평면 계산 완료 ===')
+        self.io.node.get_logger().info(f'  법선 벡터: [{n[0]:.4f}, {n[1]:.4f}, {n[2]:.4f}]')
+        self.io.node.get_logger().info(
+            f'  평면식  : {n[0]:.4f}x + {n[1]:.4f}y + {n[2]:.4f}z + {plane["d"]:.2f} = 0')
+        self.io.node.get_logger().info(f'  평탄도  : RMS {plane["rms"]:.3f} mm')
         self.plane = plane
         self.update_rviz()
         return plane
@@ -408,13 +401,14 @@ class HybridWallExplorer:
         """
         (y0, z0), (y1, z1) = start_yz, end_yz
         name = '가로' if kind == 'scan_h' else '세로'
-        self.log(f'[슬라이딩-{name}] ({y0:.0f}, {z0:.0f}) → ({y1:.0f}, {z1:.0f})')
+        self.io.node.get_logger().info(
+            f'[슬라이딩-{name}] ({y0:.0f}, {z0:.0f}) → ({y1:.0f}, {z1:.0f})')
         if self.io.mode == 'virtual':
             n = self._sliding_virtual(start_yz, end_yz, kind)
         else:
             n = self._sliding_real(plane, start_yz, end_yz, kind)
         self.update_rviz()
-        self.log(f'  -> {n}개 점 기록')
+        self.io.node.get_logger().info(f'  -> {n}개 점 기록')
 
     def _sliding_virtual(self, start_yz, end_yz, kind):
         """(virtual) 가상 벽 표면을 SCAN_FORCE 만큼 파고든 경로로 movel 하며 샘플링.
@@ -431,7 +425,7 @@ class HybridWallExplorer:
         for t in np.linspace(0.0, 1.0, steps + 1):
             y, z = p0 + t * (p1 - p0)
             target = [wall.surface_x(y, z) + press, y, z]
-            self.io.move_l(target, vel=SCAN_VEL, acc=SCAN_ACC)
+            self.io.move_l(target, vel=SCAN_VELOCITY, acc=SCAN_ACC)
             pos = self.io.get_pos()
             f = float(np.linalg.norm(self.io.get_force(pos)[:3]))
             # real 과 똑같이 '측정된 TCP 위치'를 그대로 저장 (벽이 단단해 눌린 깊이는 0.4mm 수준)
@@ -456,7 +450,7 @@ class HybridWallExplorer:
         wx1 = self.wall_x_on_plane(plane, y1, z1)
         self.io.move_l([wx0 - APPROACH_GAP, y0, z0])
         self.io.zero_force()
-        self.io.move_l([wx0 - 10.0, y0, z0], vel=PROBE_VEL * 2)
+        self.io.move_l([wx0 - 10.0, y0, z0], vel=PROBE_VELOCITY * 2)
 
         count = 0
         try:
@@ -468,7 +462,7 @@ class HybridWallExplorer:
                     raise RuntimeError('힘 제어로 벽에 닿지 못함 (평면 위치 확인)')
                 time.sleep(SAMPLE_PERIOD)
 
-            self.io.amove_l([wx1, y1, z1], SCAN_VEL, SCAN_ACC)
+            self.io.amove_l([wx1, y1, z1], SCAN_VELOCITY, SCAN_ACC)
             t0 = time.time()
             while time.time() - t0 < 0.5 or self.io.is_moving():
                 pos = self.io.get_pos()
@@ -485,7 +479,7 @@ class HybridWallExplorer:
         finally:
             self.io.release_press()
             pos = self.io.get_pos()
-            self.io.move_l([pos[0] - APPROACH_GAP, pos[1], pos[2]], vel=PROBE_VEL * 3)
+            self.io.move_l([pos[0] - APPROACH_GAP, pos[1], pos[2]], vel=PROBE_VELOCITY * 3)
         return count
 
     def check_crossings(self, tol=3.0):
@@ -504,11 +498,12 @@ class HybridWallExplorer:
                     diffs.append(hh[:, 0].mean() - vv[:, 0].mean())
         if diffs:
             d = np.abs(diffs)
-            self.log(f'[교차점 점검] {len(d)}곳, 가로-세로 X 차이 평균 {d.mean():.3f} mm, 최대 {d.max():.3f} mm')
+            self.io.node.get_logger().info(
+                f'[교차점 점검] {len(d)}곳, 가로-세로 X 차이 평균 {d.mean():.3f} mm, 최대 {d.max():.3f} mm')
 
     # ------------------------------------------------------------ 전체 실행
     def run_pipeline(self):
-        self.log(f'=== 하이브리드 벽 탐색 시작 (mode={self.io.mode}) ===')
+        self.io.node.get_logger().info(f'=== 하이브리드 벽 탐색 시작 (mode={self.io.mode}) ===')
         if self.viz is not None:
             self.viz.clear()                  # 이전 탐색 마커 지우기
         self.io.move_j(READY_J)
@@ -523,19 +518,19 @@ class HybridWallExplorer:
 
         # STEP 3-a: 가로 슬라이딩 (Y 방향)
         y0, y1 = SCAN_Y_RANGE
-        self.log('=== 가로 슬라이딩 스캔 ===')
+        self.io.node.get_logger().info('=== 가로 슬라이딩 스캔 ===')
         for z in SCAN_ROWS_Z:
             self.sliding_scan(plane, (y0, z), (y1, z), 'scan_h')
 
         # STEP 3-b: 세로 슬라이딩 (Z 방향) - 열마다 방향을 바꿔(지그재그) 이동 거리 단축
         z0, z1 = SCAN_Z_RANGE
-        self.log('=== 세로 슬라이딩 스캔 ===')
+        self.io.node.get_logger().info('=== 세로 슬라이딩 스캔 ===')
         for i, y in enumerate(SCAN_COLS_Y):
             a, b = (z0, z1) if i % 2 == 0 else (z1, z0)
             self.sliding_scan(plane, (y, a), (y, b), 'scan_v')
 
         self.check_crossings()
-        self.log('=== 탐색 완료 ===')
+        self.io.node.get_logger().info('=== 탐색 완료 ===')
 
     def save(self):
         """탐색 결과를 JSON 으로 저장하고 경로를 반환."""
@@ -555,7 +550,7 @@ class HybridWallExplorer:
         }
         with open(path, 'w') as f:
             json.dump(data, f, indent=2, ensure_ascii=False)
-        self.log(f'탐색 데이터 저장: {path} ({len(self.points)}개 점)')
+        self.io.node.get_logger().info(f'탐색 데이터 저장: {path} ({len(self.points)}개 점)')
         return path
 
 
@@ -582,12 +577,17 @@ def main(args=None):
         rclpy.shutdown()
         return
 
-    import DSR_ROBOT2 as dsr          # 반드시 __dsr__node 설정 '뒤에' import
+    try:
+        import DSR_ROBOT2 as dsr      # 반드시 __dsr__node 설정 '뒤에' import
+    except ImportError as e:
+        node.get_logger().info(f'Error importing DSR_ROBOT2 : {e}')
+        return
 
     io = RobotIO(node, dsr, mode)
     viz = WallMarkerPublisher(node, topic='wall_markers', frame_id=frame_id) if use_rviz else None
     if viz is not None:
-        io.log(f'RViz 마커: {node.resolve_topic_name("wall_markers")} (Fixed Frame: {frame_id})')
+        node.get_logger().info(
+            f'RViz 마커: {node.resolve_topic_name("wall_markers")} (Fixed Frame: {frame_id})')
     explorer = HybridWallExplorer(io, viz)
     saved = None
 
@@ -596,32 +596,29 @@ def main(args=None):
         # 실제 로봇은 움직이기 전에 한 번 더 확인받는다 (취소하면 아무 동작도 안 함)
         ans = input('[REAL] 실제 로봇이 벽 쪽으로 움직입니다. 주변 확인 후 y 입력: ')
         if ans.strip().lower() != 'y':
-            io.log('취소했습니다.')
-            node.destroy_node()
-            rclpy.shutdown()
+            node.get_logger().info('취소했습니다.')
+            safe_shutdown(node)
             return
 
     try:
         io.setup()
         explorer.run_pipeline()
     except KeyboardInterrupt:
-        io.log('사용자 중단 (Ctrl+C)')
+        node.get_logger().info('사용자 중단 (Ctrl+C)')
         io.stop()
     except Exception as e:
         node.get_logger().error(f'에러: {e}')
         io.stop()
     finally:
         # 어떤 경우에도 힘 제어 해제 → 데이터 저장 → 홈 복귀
-        try:
-            io.release_press()
-        except Exception as e:
-            node.get_logger().error(f'힘 제어 해제 실패: {e}')
-        if explorer.points:
-            saved = explorer.save()
-        try:
-            io.move_j(HOME_J)
-        except Exception as e:
-            node.get_logger().error(f'홈 복귀 실패: {e}')
+        def save_points():
+            nonlocal saved
+            if explorer.points:
+                saved = explorer.save()
+
+        run_cleanups(node, ('힘 제어 해제 실패', io.release_press),
+                     ('데이터 저장 실패', save_points),
+                     ('홈 복귀 실패', lambda: io.move_j(HOME_J)))
 
     # STEP 4: 모델링 → 최종 모델(평면/곡면/이상치)을 RViz 에도 표시
     #   (그림 창을 띄우면 창을 닫을 때까지 여기서 멈춤 - RViz 마커는 그대로 남아 있음)
@@ -633,9 +630,7 @@ def main(args=None):
     except Exception as e:
         node.get_logger().error(f'모델링 실패: {e}')
     finally:
-        node.destroy_node()
-        if rclpy.ok():
-            rclpy.shutdown()
+        safe_shutdown(node)
 
 
 if __name__ == '__main__':
