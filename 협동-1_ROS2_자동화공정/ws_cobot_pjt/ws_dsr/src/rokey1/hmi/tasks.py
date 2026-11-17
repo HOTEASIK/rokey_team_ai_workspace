@@ -67,15 +67,16 @@ def _wall_modeling(mode, p):
 
 # ----------------------------------------------------------------------------- putty_demo
 def _initialize_args(mode, p):
-    if mode == 'real':
-        return _ros_params(execute_motion=True)
-    return ['--dry-run', '--scenario', p.get('scenario', 'away')]
+    return _ros_params(execute_motion=True, virtual_gripper=(mode == 'virtual'))
 
 
 def _pickup_args(mode, p):
-    return ['--execute-motion' if mode == 'real' else '--dry-run',
+    args = ['--execute-motion',
             '--clearance', str(p['clearance']), '--settle', str(p['settle']),
             '--transfer-speed', str(p['transfer_speed']), '--pick-speed', str(p['pick_speed'])]
+    if mode == 'virtual':
+        args.append('--virtual-gripper')
+    return args
 
 
 PICKUP_PARAMS = [
@@ -185,33 +186,29 @@ TASKS = [
     # ===== PUTTY =====
     {
         'id': 'putty_cycle', 'group': 'putty', 'kind': 'process',
-        'label': '퍼티 전체 순서',
+        'label': '퍼티 초기화·집기',
         'desc': '[초기화 → 헤라 집기] 를 순서대로 실행. 앞 단계가 실패하면 뒤 단계는 실행하지 않음. '
-                '가상 모드는 로봇 없이 순서만 점검(dry-run).',
+                '가상 모드에서도 컨트롤러에 이동 요청을 전송합니다.',
         'params': PICKUP_PARAMS,
         'build': lambda mode, p: [_run('initialize_device', *_initialize_args(mode, p)),
                                   _run('pickup_spatula', *_pickup_args(mode, p))],
-        'motion': lambda mode: mode == 'real',
+        'motion': lambda mode: True,
     },
     {
         'id': 'initialize_device', 'group': 'putty', 'kind': 'process',
         'label': '초기화',
-        'desc': '홈 자세로 돌아간 뒤 빈 RG2 그리퍼를 닫는다. 가상 모드는 시나리오별 응답으로 점검.',
-        'params': [
-            _p('scenario', '가상 시나리오', 'select', 'away',
-               ['away', 'already_home', 'joint_failure', 'move_failure', 'home_not_reached', 'io_failure'],
-               help_='가상 모드 전용. away=정상 / 나머지=각 실패 상황 재현'),
-        ],
+        'desc': '홈 자세로 돌아간 뒤 RG2를 닫는다. 가상 모드는 가상 집게 서비스를 사용한다.',
+        'params': [],
         'build': lambda mode, p: [_run('initialize_device', *_initialize_args(mode, p))],
-        'motion': lambda mode: mode == 'real',
+        'motion': lambda mode: True,
     },
     {
         'id': 'pickup_spatula', 'group': 'putty', 'kind': 'process',
         'label': '헤라 집기',
-        'desc': '7번 위치의 헤라 위로 이동 → 내려가서 RG2 로 집기 → 들어 올리기.',
+        'desc': '현재 보관 위치 [308.42,120.70,152.43] 위로 이동 → 헤라 집기 → 상승.',
         'params': PICKUP_PARAMS,
         'build': lambda mode, p: [_run('pickup_spatula', *_pickup_args(mode, p))],
-        'motion': lambda mode: mode == 'real',
+        'motion': lambda mode: True,
     },
 
     # ===== SANDING =====
