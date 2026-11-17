@@ -11,8 +11,9 @@
 PKG = 'rokey1'
 MODES = ('virtual', 'real')
 
-DEFAULT_START = '364.96,-184.31,92.91,61.79,-177.53,61.44'
-DEFAULT_END = '464.96,-184.31,92.91,61.79,-177.53,61.44'
+# 샌딩: 비워 두면 sanding_server 의 기본 작업 (도구 1 → 시작 관절각 [-8.21, 31.18, 114.93, -10.05, -50.25, 100.44] 에서 +Y 10cm)
+DEFAULT_START = ''
+DEFAULT_END = ''
 
 
 def _run(exe, *args):
@@ -213,24 +214,42 @@ TASKS = [
 
     # ===== SANDING =====
     {
-        'id': 'tool_task_server', 'group': 'sanding', 'kind': 'service',
+        'id': 'sanding_server', 'group': 'sanding', 'kind': 'service',
         'label': '샌딩 액션 서버',
-        'desc': '/dsr01/tool_task 액션 서버를 띄운다. [샌딩 작업 실행] 전에 먼저 시작해 두어야 함 '
-                '(RG2 /onrobot 필요).',
-        'params': [],
-        'build': lambda mode, p: [_run('tool_task_server')], 'motion': lambda mode: False,
+        'desc': '/dsr01/tool_task 액션 서버(sanding_server)를 띄운다. '
+                '[샌딩 작업 실행] 전에 먼저 시작해 두어야 함 (RG2 /onrobot 필요).',
+        'params': [
+            _p('retreat_on_cancel', '정지(STOP) 시 벽에서 후퇴', 'bool', False,
+               help_='끄면 STOP/E-STOP 때 그 자리에서 멈춤 (E-STOP 도 같은 취소로 오므로 기본 끔)'),
+            _p('go_home', '작업 전 항상 홈 자세로', 'bool', False,
+               help_='끄면 현재 팔 형태로 도구에 못 갈 때만 홈 [0,0,90,0,90,0] 으로 먼저 이동'),
+            _p('floor_z', '벽 아래 바닥 높이 z (mm)', 'number', 35.0,
+               help_='베이스 기준 바닥 높이. 바닥 근처(바닥+반지름+여유 아래) 시작/종료 z 는 전부 바닥에 붙여서 작업'),
+            _p('tool_radius', '원형 도구 반지름 (mm)', 'number', 45.0,
+               help_='도구 중앙을 잡으므로 벽 작업 때 도구 아래끝 = TCP - 반지름'),
+            _p('floor_clear', '바닥 여유 (mm)', 'number', 1.0,
+               help_='도구 아래끝과 바닥 사이 간격. 맨 아래가 덜 갈리면 줄이고(0~1), 바닥에 걸리면 늘리세요'),
+        ],
+        'build': lambda mode, p: [_run('sanding_server', *_ros_params(retreat_on_cancel=p['retreat_on_cancel'],
+                                                                      go_home=p['go_home'],
+                                                                      floor_z=p['floor_z'],
+                                                                      tool_radius=p['tool_radius'],
+                                                                      floor_clear=p['floor_clear']))],
+        'motion': lambda mode: False,
     },
     {
         'id': 'sanding_goal', 'group': 'sanding', 'kind': 'action',
         'label': '샌딩 작업 실행',
-        'desc': '도구 거치대에서 도구를 집고 → 시작점에서 종료점까지 직선으로 샌딩한다 (ToolTask goal 전송).',
+        'desc': '도구 집기 → 벽에 90도로 접촉 → 순응/힘제어 샌딩 (시작/종료 왕복 + 중간 원) → 도구 반납. '
+                '시작/종료를 비우면 정해 둔 기본 작업.',
         'params': [
             _p('tool_id', '도구 번호', 'select', '1', ['1', '2', '3'], help_='거치대에서 집을 도구 번호'),
             _p('start_posx', '시작 posx x,y,z,a,b,c', 'text', DEFAULT_START,
-               help_='작업 시작 위치 (BASE 기준, mm / deg)'),
+               help_='비우면 기본 작업 (정해 둔 시작 관절각에서 +Y 10cm). '
+                     '넣으면: TCP 가 벽(또는 바닥)을 향하게 교시한 값, 툴 Z 로 벽 방향 자동 판단해 90도 보정'),
             _p('end_posx', '종료 posx x,y,z,a,b,c', 'text', DEFAULT_END,
-               help_='작업 종료 위치 (BASE 기준, mm / deg)'),
-            _p('return_tool', '작업 후 도구 반납', 'bool', False, help_='끝나면 도구를 거치대에 다시 놓음'),
+               help_='종료 위치 (BASE 기준, 자세는 시작 자세 사용). 시작을 비우면 무시'),
+            _p('return_tool', '작업 후 도구 반납', 'bool', True, help_='끝나면 도구를 거치대에 다시 놓음'),
         ],
         'build': None, 'motion': lambda mode: True,
     },
@@ -286,7 +305,11 @@ def normalize_params(task, raw):
             value = str(value).strip()
             if any(c in value for c in '\n\r\0'):
                 raise ValueError(f'{spec["label"]}: 줄바꿈은 쓸 수 없습니다')
+            if key.endswith('_posx') and value:
+                parse_posx(value)   # 시작 전에 형식 검사 (비우면 샌딩 기본 작업)
         out[key] = value
+    if 'start_posx' in out and out['start_posx'] and not out.get('end_posx'):
+        raise ValueError('종료 posx 를 넣어 주세요 (시작/종료 둘 다 비우면 기본 작업)')
     return out
 
 

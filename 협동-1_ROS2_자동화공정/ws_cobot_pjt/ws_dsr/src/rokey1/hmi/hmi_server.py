@@ -639,8 +639,9 @@ class HmiNode(Node):
         p = run.params
         goal = ToolTask.Goal()
         goal.tool_id = int(p['tool_id'])
-        goal.start_posx = parse_posx(p['start_posx'])
-        goal.end_posx = parse_posx(p['end_posx'])
+        # 시작을 비우면 전부 0 → sanding_server 가 기본 작업 (정해 둔 시작 관절각 + 10cm)
+        goal.start_posx = parse_posx(p['start_posx']) if p['start_posx'] else [0.0] * 6
+        goal.end_posx = parse_posx(p['end_posx']) if p['start_posx'] else [0.0] * 6
         goal.return_tool = bool(p['return_tool'])
         run.command = (f'tool_task goal tool_id={goal.tool_id} start={list(goal.start_posx)} '
                        f'end={list(goal.end_posx)} return_tool={goal.return_tool}')

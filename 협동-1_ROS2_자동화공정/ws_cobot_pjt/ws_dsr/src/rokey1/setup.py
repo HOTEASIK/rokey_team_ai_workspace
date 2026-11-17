@@ -41,6 +41,8 @@ setup(
             'navigation_rviz_sim = navigation.rviz_sim_node:main',
             'tool_task_server = sanding.tool_task_action_server:main',
             'tool_task_client = sanding.tool_task_client:main',
+            'sanding_server = sanding.sanding_server:main',
+            'sanding_client = sanding.sanding_client:main',
             'initialize_device = putty_demo.initialize_device:main',
             'pickup_spatula = putty_demo.pickup_spatula:main',
             'scoop_putty = putty_demo.scoop_putty:main',
