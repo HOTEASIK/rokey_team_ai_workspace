@@ -2,7 +2,7 @@
 
 # ===== 파일 역할 / 통신 안내 =====
 # 전체 순서: 초기화 → 집기 → 스쿱 → 평면 도포 → 반납 → 초기화.
-# 한 단계가 정상 종료해야 다음 프로세스를 시작하며, 단계 사이 ROS Action/토픽은 사용하지 않는다.
+# 각 단계는 PuttyTask Action을 요청한다. 결과 확인 후 클라이언트가 종료하면 다음 Goal을 보낸다.
 # 옵션은 명령행 인자/ROS 파라미터로 전달하고 실제 로봇 상태는 각 노드가 서비스로 조회한다.
 # 현재 전체 launch는 가상 집게 및 기존 geometry 스쿱 경로를 사용하며, 실물 전체 자동화 경로가 아니다.
 
@@ -21,6 +21,7 @@ from launch_ros.actions import Node
 
 DEFAULTS = {
     'execute_motion': 'false',
+    'start_action_server': 'true',
     'plane': 'xy',
     'normal_sign': 'positive',
     'start': '695.42 -223.46 35',
@@ -60,7 +61,7 @@ def launch_sequence(context):
     if not execute:
         raise ValueError('이동 실행에는 execute_motion:=true를 지정하세요.')
     for name, value in values.items():
-        if name in ('execute_motion', 'plane', 'normal_sign', 'start', 'end'):
+        if name in ('execute_motion', 'start_action_server', 'plane', 'normal_sign', 'start', 'end'):
             continue
         number = float(value)
         if not math.isfinite(number):
@@ -71,15 +72,19 @@ def launch_sequence(context):
         raise ValueError('Invalid scoop_angle or settle')
 
     def process(executable, options=(), extra=()):
-        cmd = [FindExecutable(name='ros2'), 'run', 'rokey1', executable,
-               '--execute-motion', *extra]
+        tasks = {'pickup_spatula': 'pickup', 'scoop_putty': 'scoop',
+                 'apply_putty_plane': 'apply', 'return_spatula': 'return'}
+        # 가상 전체 공정의 기존 수치/경로는 그대로 전달한다.
+        extra = tuple(value for value in extra if value != '--virtual-gripper')
+        cmd = [FindExecutable(name='ros2'), 'run', 'rokey1', 'putty_task_client',
+               tasks[executable], '--virtual-mode', '--', *extra]
         for name in options:
             cmd.extend(['--'+name.replace('_', '-'), values[name]])
         return ExecuteProcess(cmd=cmd, output='screen')
 
     def initialize():
-        return Node(package='rokey1', executable='initialize_device', output='screen',
-                    parameters=[{'execute_motion': True, 'virtual_gripper': True}])
+        return ExecuteProcess(cmd=[FindExecutable(name='ros2'), 'run', 'rokey1',
+                                   'putty_task_client', 'initialize', '--virtual-mode'], output='screen')
 
     # 시작 전에 평면 입력을 검증해 초기화 후 잘못된 입력으로 중단하지 않게 한다.
     from types import SimpleNamespace
@@ -119,7 +124,12 @@ def launch_sequence(context):
             target_action=stage,
             on_exit=lambda event, ctx, following=following: after_step(event, following),
         )))
-    return [*handlers, LogInfo(msg='가상 퍼티 공정 시작'), stages[0]]
+    start_server = values['start_action_server'].lower()
+    if start_server not in ('true', 'false'):
+        raise ValueError('start_action_server must be true or false')
+    server = ([Node(package='rokey1', executable='putty_task_server', output='screen',
+                    sigterm_timeout='30')] if start_server == 'true' else [])
+    return [*server, *handlers, LogInfo(msg='가상 퍼티 Action 공정 시작'), stages[0]]
 
 
 def generate_launch_description():

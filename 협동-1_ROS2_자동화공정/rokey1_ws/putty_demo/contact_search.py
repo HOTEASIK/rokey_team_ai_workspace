@@ -12,14 +12,30 @@ import time
 
 
 # BASE X만 힘 제어하도록 dir=[1,0,0,0,0,0], 절대 목표 힘을 요청한다.
-def press_force_request(value):
+#def press_force_request(value):
+#    from dsr_msgs2.srv import SetDesiredForce
+#    request = SetDesiredForce.Request()
+#    request.fd = [value, 0.0, 0.0, 0.0, 0.0, 0.0]
+#    request.dir = [1, 0, 0, 0, 0, 0]
+#    request.ref, request.mod, request.time = 0, 1, 0.3
+#    return request
+def press_force_request(value, mode=1):
+    import math
     from dsr_msgs2.srv import SetDesiredForce
+
+    value = float(value)
+    if not math.isfinite(value) or value < 10.0:
+        raise ValueError('BASE X 힘 목표는 10 N 이상의 유한한 값이어야 합니다.')
+
     request = SetDesiredForce.Request()
     request.fd = [value, 0.0, 0.0, 0.0, 0.0, 0.0]
-    request.dir = [1, 0, 0, 0, 0, 0]
-    request.ref, request.mod, request.time = 0, 0, 0.3
+    request.dir = [1, 0, 0, 0, 0, 0]  # BASE X축 힘 제어 활성화
+    request.ref = 0                   # BASE 좌표계
+    if mode not in (0, 1):
+        raise ValueError('힘 모드는 absolute(0)/relative(1)여야 합니다.')
+    request.mod = mode                # 기존 기본값 1 유지. 팀 YAML에서도 지정 가능.
+    request.time = 0.3                 # 목표 힘까지 도달하는 시간
     return request
-
 
 # 컴플라이언스와 목표 힘의 시작/해제를 묶는 내부 클래스다. 노드가 아니다.
 class WallForceHold:
@@ -30,7 +46,7 @@ class WallForceHold:
         self.active = False
 
     def start(self):
-        self.active = True  # 응답 실패여도 컨트롤러 적용 여부가 불확실하므로 정리한다.
+        self.active = True  # 응답 실패여도 컨트롤러 적용 여부가 불확실하므로 정리한다
         self.io.compliance(self.stiffness)
         self.io.set_force(self.force)
 

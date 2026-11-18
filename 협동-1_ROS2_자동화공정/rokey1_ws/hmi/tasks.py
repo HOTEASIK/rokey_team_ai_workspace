@@ -11,7 +11,7 @@
 PKG = 'rokey1'
 MODES = ('virtual', 'real')
 
-# 샌딩: 비워 두면 sanding_server 의 기본 작업 (도구 1 → 시작 관절각 [-8.21, 31.18, 114.93, -10.05, -50.25, 100.44] 에서 +Y 10cm)
+# 팀 샌딩 서버: 빈 시작/끝은 서버에 등록된 기본 작업을 사용한다.
 DEFAULT_START = ''
 DEFAULT_END = ''
 
@@ -78,6 +78,18 @@ def _pickup_args(mode, p):
     if mode == 'virtual':
         args.append('--virtual-gripper')
     return args
+
+
+def putty_arguments(task, params):
+    """HMI 입력을 PuttyTask Goal의 기존 작업 설정 토큰으로 변환한다."""
+    names = {
+        'initialize': (),
+        'pickup': ('clearance', 'settle', 'transfer_speed', 'pick_speed'),
+        'scoop': ('scoop_speed',),
+        'apply': ('floor_force', 'wall_force', 'press_force', 'apply_speed'),
+        'return': ('place_speed',),
+    }[task]
+    return [token for name in names for token in ('--'+name.replace('_', '-'), str(params[name]))]
 
 
 PICKUP_PARAMS = [
@@ -186,30 +198,62 @@ TASKS = [
 
     # ===== PUTTY =====
     {
-        'id': 'putty_cycle', 'group': 'putty', 'kind': 'process',
+        'id': 'putty_task_server', 'group': 'putty', 'kind': 'service',
+        'label': '퍼티 액션 서버',
+        'desc': '/dsr01/putty_task 서버 시작. 작업 Goal 전에는 움직이지 않습니다. 먼저 시작하세요.',
+        'params': [], 'build': lambda mode, p: [_run('putty_task_server')],
+        'motion': lambda mode: False,
+    },
+    {
+        'id': 'putty_cycle', 'group': 'putty', 'kind': 'action',
+        'putty_tasks': ('initialize', 'pickup'),
         'label': '퍼티 초기화·집기',
         'desc': '[초기화 → 헤라 집기] 를 순서대로 실행. 앞 단계가 실패하면 뒤 단계는 실행하지 않음. '
                 '가상 모드에서도 컨트롤러에 이동 요청을 전송합니다.',
         'params': PICKUP_PARAMS,
-        'build': lambda mode, p: [_run('initialize_device', *_initialize_args(mode, p)),
-                                  _run('pickup_spatula', *_pickup_args(mode, p))],
+        'build': None,
         'motion': lambda mode: True,
     },
     {
-        'id': 'initialize_device', 'group': 'putty', 'kind': 'process',
+        'id': 'initialize_device', 'group': 'putty', 'kind': 'action',
+        'putty_tasks': ('initialize',),
         'label': '초기화',
         'desc': '홈 자세로 돌아간 뒤 RG2를 닫는다. 가상 모드는 가상 집게 서비스를 사용한다.',
         'params': [],
-        'build': lambda mode, p: [_run('initialize_device', *_initialize_args(mode, p))],
+        'build': None,
         'motion': lambda mode: True,
     },
     {
-        'id': 'pickup_spatula', 'group': 'putty', 'kind': 'process',
+        'id': 'pickup_spatula', 'group': 'putty', 'kind': 'action',
+        'putty_tasks': ('pickup',),
         'label': '헤라 집기',
         'desc': '현재 보관 위치 [308.42,120.70,152.43] 위로 이동 → 헤라 집기 → 상승.',
         'params': PICKUP_PARAMS,
-        'build': lambda mode, p: [_run('pickup_spatula', *_pickup_args(mode, p))],
+        'build': None,
         'motion': lambda mode: True,
+    },
+    {
+        'id': 'scoop_putty', 'group': 'putty', 'kind': 'action', 'putty_tasks': ('scoop',),
+        'label': '퍼티 뜨기', 'desc': '측정 경로로 퍼티 뜨기. 실물에서는 파지 확인이 필요합니다.',
+        'params': [_p('tool_held_confirmed', '헤라 파지 확인', 'bool', False),
+                   _p('scoop_speed', '스쿱 속도 (mm/s)', 'number', 3.0, scale=True)],
+        'build': None, 'motion': lambda mode: True,
+    },
+    {
+        'id': 'apply_putty_plane', 'group': 'putty', 'kind': 'action', 'putty_tasks': ('apply',),
+        'label': '벽면 퍼티 도포',
+        'desc': 'YZ 벽 탐색→6 N 실측 확인→상향 도포. 현재 접촉 자세의 특이점 문제는 미해결입니다.',
+        'params': [_p('floor_force', '바닥 감지 변화량 (N)', 'number', 2.3),
+                   _p('wall_force', '벽 감지 변화량 (N)', 'number', 2.3),
+                   _p('press_force', '도포 목표 힘 (N)', 'number', 6.0),
+                   _p('apply_speed', '도포 속도 (mm/s)', 'number', 10.0, scale=True)],
+        'build': None, 'motion': lambda mode: True,
+    },
+    {
+        'id': 'return_spatula', 'group': 'putty', 'kind': 'action', 'putty_tasks': ('return',),
+        'label': '헤라 반납 (가상 전용)', 'desc': '보관 위치로 헤라 반납. 홈 이동은 초기화를 별도 요청합니다.',
+        'params': [_p('place_speed', '반납 속도 (mm/s)', 'number', 10.0, scale=True)],
+        'build': None, 'motion': lambda mode: True,
     },
 
     # ===== SANDING =====

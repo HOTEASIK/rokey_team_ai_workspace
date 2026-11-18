@@ -26,8 +26,8 @@ STROKE_HEIGHT = 180.0
 WALL_EDGE_OFFSET = (0.0, 0.0, 120.0)
 # 현재 실물 YZ 벽 도포 설정. 값은 기존 설정을 그대로 모았다.
 PRESS_FORCE_N = 6.0          # 위로 바르는 동안 BASE +X 유지 힘
-BLADE_START_ANGLE_DEG = 45.0  # 벽과 헤라 사이 시작 각도
-BLADE_END_ANGLE_DEG = 30.0    # 벽과 헤라 사이 종료 각도
+BLADE_START_ANGLE_DEG = 20.0  # 벽과 헤라 사이 시작 각도
+BLADE_END_ANGLE_DEG = 10.0    # 벽과 헤라 사이 종료 각도
 SEARCH_DISTANCE_MM = 20.0    # −Z / +X 탐색 최대 거리
 SEARCH_SPEED_MM_S = 2.0      # 접촉 탐색 속도
 
@@ -64,7 +64,8 @@ def main():
 def make_plane_parser():
     parser = make_parser(include_j6=False)
     parser.description = __doc__
-    parser.set_defaults(edge_offset=WALL_EDGE_OFFSET)
+    # 도포 실행은 특이점 자동회피/알람 감시/힘 제어 진입 차단을 항상 적용한다.
+    parser.set_defaults(edge_offset=WALL_EDGE_OFFSET, singularity_guard=True)
     parser.add_argument('--plane', choices=PLANE_AXIS, default='yz')
     parser.add_argument('--normal-sign', choices=('positive', 'negative'), default=None,
                         help='면 바깥 방향: 기본 YZ 벽은 negative (+X 접근)')
@@ -86,12 +87,15 @@ def make_plane_parser():
     parser.add_argument('--search-speed', type=float, default=SEARCH_SPEED_MM_S, help='접촉 탐색 속도 mm/s')
     parser.add_argument('--press-force', type=float, default=PRESS_FORCE_N,
                         help='벽 접촉 탐색 후 도포 중 BASE +X 유지 힘 N')
+    parser.add_argument('--force-mode', choices=('absolute', 'relative'), default='relative',
+                        help='목표 힘 기준. 현재 현장 설정인 상대 모드를 기본으로 유지')
+    parser.add_argument('--force-stiffness', type=float, nargs=6,
+                        default=(3000.0, 3000.0, 3000.0, 200.0, 200.0, 200.0))
     # 새 실측 감시 기준. 기존 이동·각도·목표 힘 설정과 구분한다.
     parser.add_argument('--force-tolerance', type=float, default=1.0, help='|BASE Fx| 허용오차 N')
-    parser.add_argument('--force-wait-timeout', type=float, default=5.0, help='상승 전 힘 형성 대기 한도 s')
+    parser.add_argument('--force-wait-timeout', type=float, default=30.0, help='상승 전 힘 형성 대기 한도 s')
     parser.add_argument('--force-stable-time', type=float, default=0.5, help='출발 전 힘 안정 유지 시간 s')
     parser.add_argument('--force-loss-timeout', type=float, default=0.5, help='도포 중 힘 부족 허용 시간 s')
-    parser.set_defaults(force_stiffness=(3000.0, 3000.0, 3000.0, 200.0, 200.0, 200.0))
     return parser
 
 
@@ -127,6 +131,9 @@ def validate(args):
         raise ValueError('종료 각도는 0도 초과 90도 미만이어야 합니다.')
     if not isinstance(samples, int) or not 2 <= samples <= 100:
         raise ValueError('연속 도포 samples는 2~100 정수여야 합니다.')
+    stiffness = getattr(args, 'force_stiffness', (3000, 3000, 3000, 200, 200, 200))
+    if len(stiffness) != 6 or not all(math.isfinite(v) and v >= 0 for v in stiffness):
+        raise ValueError('force-stiffness는 0 이상의 유한한 값 6개여야 합니다.')
     if args.start is None or args.end is None:
         raise ValueError('plane 케이스는 --start 및 --end가 필요합니다.')
     if args.plane not in PLANE_AXIS or args.normal_sign not in ('positive', 'negative'):

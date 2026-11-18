@@ -122,13 +122,14 @@ def test_force_mode_only_excludes_x_from_goal_check():
     assert not stroke_arrived((710, 0, 210, 0, 90, 0), target, force_active=True)
 
 
-@pytest.mark.parametrize('force', [2.3, 5.0])
-def test_absolute_base_positive_x_force_request(force):
+@pytest.mark.parametrize('force', [10.0, 12.0])
+@pytest.mark.parametrize('mode', [0, 1])
+def test_base_positive_x_force_request(force, mode):
     from putty_demo.contact_search import press_force_request
-    request = press_force_request(force)
+    request = press_force_request(force, mode=mode)
     assert list(request.fd) == [force, 0, 0, 0, 0, 0]
     assert list(request.dir) == [1, 0, 0, 0, 0, 0]
     assert request.ref == 0
-    assert request.mod == 0  # 상대 힘 추가가 아닌 절대 목표 힘
+    assert request.mod == mode
 
 

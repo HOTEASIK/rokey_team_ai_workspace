@@ -4,6 +4,33 @@ ROS 2 Jazzy / M0609 / RG2, 네임스페이스 `dsr01`, TCP `GripperDA_v1`을 사
 bringup의 real/virtual 연결에 이동 요청을 보내며 로그 전용 실행·가짜 응답 모드는 없습니다.
 가상 집게 `--virtual-gripper`는 실제 가상 서비스를 호출하는 옵션으로 유지합니다.
 
+현재 HMI/공정 launch는 `/dsr01/putty_task` Action으로 작업을 요청합니다.
+이동 중 피드백·취소·실제 정지/힘 해제 확인 및 실행 예시는 [ACTIONS.md](ACTIONS.md)를 확인합니다.
+아래 기존 `ros2 run initialize_device` 등은 수동 실행 호환 경로입니다.
+
+## 도포 특이점 처리
+
+`apply_putty_plane`은 이동 전에 다음 정책을 설정하고 응답 성공을 확인합니다.
+
+- `motion/set_singularity_handling`: `SetSingularityHandling`, mode=0 (`DR_AVOID`, 자동 회피).
+- `motion/set_singular_handling_force`: `SetSingularHandlingForce`, mode=0 (`DR_SINGULARITY_ERROR`).
+  이전 로그의 mode=1(에러 무시)을 유지하지 않습니다.
+- 별도 노드 `/dsr01/putty_singularity_monitor`가 `/dsr01/error`의 `RobotError`를 수신합니다.
+  code=3205 영역 진입과 특이점 경고/에러를 감지하면 해당 실행을 중단합니다.
+  명시적 Inside→Outside 알림만으로는 중단하지 않지만, 이미 감지한 위험을 자동 해제하지 않습니다.
+- 동기 MoveLine/MoveSplineTask 서비스 응답 대기도 0.05초씩 나눠 알람을 확인합니다.
+- 감지 후 정지 확인 → 활성 힘/컴플라이언스 해제 → 실패 결과 반환.
+  자동 MoveJ 회복·재접근·재시도는 없습니다. Action 경로는 서버도 정리를 재확인합니다.
+- 감시 publisher 없음/소실, 감시 스레드 중단 또는 정책 설정 실패 시 이동을 시작하지 않거나 중단합니다.
+
+현재 V2 드라이버에는 `get_force_control_state` ROS 서비스가 없으므로 직접 위험도 0/1/2를
+조회하는 구현은 아닙니다. 알람 부재는 현재 자세가 안전하다는 뜻이 아니며, 컨트롤러의
+힘 제어 진입 시 특이점 에러 정책을 함께 사용합니다. 과거 최신 알람을 현재 상태로 오인하지 않습니다.
+자동 회피는 경로를 바꿀 수 있으며, 이미 특이점인 자세에서 벗어나는 동작을 보장하지 않습니다.
+이 설정만으로 6 N 형성 문제가 해결됐다고 볼 수 없습니다. 경로/힘 수치는 기존 그대로입니다.
+소프트웨어 알람 감시의 지연은 통신/스케줄링에 영향을 받으며 실시간 보호 기능이 아닙니다.
+정책은 컨트롤러에 적용되며 이전 값을 조회할 API가 없어 종료 시 임의 값으로 복원하지 않습니다.
+
 ## 실행 조건
 
 - argparse 노드는 `--execute-motion`을 반드시 지정해야 합니다.
@@ -11,7 +38,7 @@ bringup의 real/virtual 연결에 이동 요청을 보내며 로그 전용 실�
 - 공정 launch도 `execute_motion:=true`가 없으면 오류로 종료합니다.
 - 실행 요청 옵션을 생략해도 자동으로 움직이지 않습니다.
 - 좌표·속도·각도·오프셋·높이 기본값은 기존 값을 유지했습니다.
-- 초기화·픽업은 real/virtual 경로가 있고 도포·반납과 기존 기하 스쿱은 가상 컨트롤러 확인을 유지하고, 측정 자세 스쿱은 real/virtual을 지원합니다.
+- 초기화·픽업·측정 스쿱·단독 도포는 real/virtual 경로가 있습니다. 반납·기하 스쿱·전체 공정 launch는 가상 전용입니다.
 - 가상 로봇 구동과 외부 카메라는 별개입니다. 이 패키지의 작업은 카메라를 사용하지 않습니다.
 
 ## 공통 환경
@@ -72,7 +99,7 @@ ros2 run rokey1 scoop_putty --execute-motion --path geometry --scoop-angle 45
 
 독립 도포 실행 노드는 `apply_putty_plane`만 사용합니다.
 이전 `apply_putty`, `apply_putty_j6` 실행 파일과 명령은 제거했습니다.
-현재 디스크의 원본은 `src/rokey1/putty_demo/apply_putty_plane.py`입니다.
+현재 디스크의 원본은 `src/rokey1_ws/putty_demo/apply_putty_plane.py`입니다.
 공통 계산은 `putty_geometry.py`, ROS 통신은 `putty_motion.py`에 있으며 단독 실행 노드가 아닙니다.
 
 ```bash
@@ -316,7 +343,7 @@ Y/Z와 각도는 기존 오차 기준으로 확인합니다. 각도 변경에 �
 - `--press-force 6`: 기존 BASE +X 절대 목표 힘. 감지 기준에 더하는 상대 모드가 아닙니다.
 - `--force-tolerance 1`: |BASE Fx|가 5~7 N 범위일 때 정상 판정.
 - `--force-stable-time 0.5`: 같은 실측 부호로 범위 안에서 0.5초 이상·3회 이상 확인 후 출발.
-- `--force-wait-timeout 5`: 5초 내 출발 조건 미충족 시 정지·해제, 상승하지 않음.
+- `--force-wait-timeout 30`: 30초 내 출발 조건 미충족 시 정지·해제, 상승하지 않음.
 - `--force-loss-timeout 0.5`: 도포 중 5 N 미만이 0.5초 지속되면 정지·해제.
 - 7 N 초과, 안정 후 반대 부호의 5~7 N, 센서 오류, 비정상 로봇 상태도 중단.
 - 힘 형성 중 벽 감지 위치에서 X 이동 한도는 기존 `--search-distance 20` mm,
@@ -376,6 +403,6 @@ call_async는 서비스 요청을 보내고 Future를 반환합니다. 이어지
 이 Python 전송 방식과 이동 요청의 sync_type(로봇 동작 완료 대기 여부)은 다른 개념입니다.
 GetToolForce 조회 성공과 목표 힘 유지 성공은 같지 않습니다. 현재는 상승 전 실측 힘 안정 대기와 도포 중 감시를 수행합니다.
 
-launch는 ROS 메시지로 공정 완료를 받는 방식이 아니라 OnProcessExit로 실행 프로세스의
-정상 종료 코드를 확인한 뒤 다음 프로세스를 시작합니다. 현재 launch 전체 공정에는 실물 전용
-제약이 남아 있으므로 단일 실물 도포 실행과 구분해야 합니다.
+launch는 PuttyTask 결과를 받은 ActionClient의 종료 코드를 확인한 뒤 다음 Goal을 보냅니다.
+HMI는 직접 ActionClient로 결과·피드백을 받습니다. 내부 작업 노드의 서비스 호출 구조는 유지합니다.
+전체 공정은 가상 전용이며 현재 실물 벽 도포와 구분해야 합니다.

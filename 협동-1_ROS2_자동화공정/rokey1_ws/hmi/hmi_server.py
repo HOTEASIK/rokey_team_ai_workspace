@@ -52,6 +52,8 @@ from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
 from rclpy.callback_groups import ReentrantCallbackGroup
 from sensor_msgs.msg import JointState
+from rcl_interfaces.msg import Parameter, ParameterType, ParameterValue   # 샌딩 누르는 힘 전달
+from rcl_interfaces.srv import SetParameters
 
 from hmi.tasks import MODES, TASK_MAP, apply_speed, catalog, normalize_params, parse_posx
 
@@ -495,6 +497,9 @@ class HmiNode(Node):
 
         self.gripper_cli = (self.create_client(SetCommand, '/onrobot/sendCommand', callback_group=self.cb)
                             if HAVE_ONROBOT else None)
+        # [샌딩 작업 실행] 의 누르는 힘을 sanding_server 파라미터로 넘김 (액션 goal 에는 힘 항목이 없음)
+        self.sanding_params = self.create_client(SetParameters, f'/{rid}/sanding_server/set_parameters',
+                                                 callback_group=self.cb)
         self.tool_task = (ActionClient(self, ToolTask, f'/{rid}/tool_task', callback_group=self.cb)
                           if HAVE_TOOL_TASK else None)
         self.create_timer(1.0 / max(poll_hz, 0.2), self._poll, callback_group=self.cb)
@@ -643,8 +648,11 @@ class HmiNode(Node):
         goal.start_posx = parse_posx(p['start_posx']) if p['start_posx'] else [0.0] * 6
         goal.end_posx = parse_posx(p['end_posx']) if p['start_posx'] else [0.0] * 6
         goal.return_tool = bool(p['return_tool'])
+        force = float(p.get('press_force', 13.0))
         run.command = (f'tool_task goal tool_id={goal.tool_id} start={list(goal.start_posx)} '
-                       f'end={list(goal.end_posx)} return_tool={goal.return_tool}')
+                       f'end={list(goal.end_posx)} return_tool={goal.return_tool} press_force={force:g}N')
+        if not self.sanding_params.service_is_ready():
+            raise RuntimeError('sanding_server 파라미터 서비스가 없습니다. [샌딩 액션 서버] 를 다시 시작하세요.')
 
         def on_feedback(msg):
             fb = msg.feedback
@@ -673,7 +681,24 @@ class HmiNode(Node):
             else:
                 self.manager._finish(run, 'done' if res.success else 'failed')
 
-        self.tool_task.send_goal_async(goal, feedback_callback=on_feedback).add_done_callback(on_goal)
+        def on_param(f):
+            try:
+                r = f.result().results[0]
+                ok, why = r.successful, r.reason
+            except Exception as ex:
+                ok, why = False, str(ex)
+            if not ok:
+                self.hub.log('ERROR', 'SANDING', f'누르는 힘 {force:g} N 설정 실패: {why} '
+                                                 '([샌딩 액션 서버] 를 다시 시작해 보세요)', run_id=run.id)
+                self.manager._finish(run, 'failed')
+                return
+            self.hub.log('INFO', 'SANDING', f'샌딩 누르는 힘 {force:g} N', run_id=run.id)
+            self.tool_task.send_goal_async(goal, feedback_callback=on_feedback).add_done_callback(on_goal)
+
+        req = SetParameters.Request()
+        req.parameters = [Parameter(name='press_force',
+                                    value=ParameterValue(type=ParameterType.PARAMETER_DOUBLE, double_value=force))]
+        self.sanding_params.call_async(req).add_done_callback(on_param)
 
     def cancel_goal(self, run):
         if run.goal_handle is not None:

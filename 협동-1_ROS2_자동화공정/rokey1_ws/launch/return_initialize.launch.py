@@ -2,7 +2,7 @@
 
 # ===== 파일 역할 / 통신 안내 =====
 # launch는 반납 성공 후 초기화(홈 복귀)를 실행한다. 실패하면 다음 프로세스를 시작하지 않는다.
-# 각 노드는 ROS 서비스로 컨트롤러와 통신하고, launch는 프로세스 종료 코드만 확인한다.
+# 각 클라이언트가 Action 결과를 확인한다. 이동 중 취소/정지는 액션 서버가 처리한다.
 # 현재 이 반납 launch는 가상 집게와 가상 컨트롤러 경로를 사용한다.
 
 import math
@@ -35,16 +35,21 @@ def launch_sequence(context):
         number = float(LaunchConfiguration(name).perform(context))
         if not math.isfinite(number) or number < 0 or (name != 'settle' and number == 0):
             raise ValueError(f'Invalid {name}: {number}')
-    command = [FindExecutable(name='ros2'), 'run', 'rokey1', 'return_spatula',
-               '--execute-motion']
+    command = [FindExecutable(name='ros2'), 'run', 'rokey1', 'putty_task_client',
+               'return', '--virtual-mode', '--']
     for option in ('transfer-speed', 'place-speed', 'transfer-z', 'settle'):
         command.extend([f'--{option}', LaunchConfiguration(option.replace('-', '_'))])
     returning = ExecuteProcess(cmd=command, output='screen')
-    initialize = Node(
-        package='rokey1', executable='initialize_device', output='screen',
-        parameters=[{'execute_motion': True, 'virtual_gripper': True}],
-    )
+    initialize = ExecuteProcess(
+        cmd=[FindExecutable(name='ros2'), 'run', 'rokey1', 'putty_task_client',
+             'initialize', '--virtual-mode'], output='screen')
+    start_server = LaunchConfiguration('start_action_server').perform(context).lower()
+    if start_server not in ('true', 'false'):
+        raise ValueError('start_action_server must be true or false')
+    server = ([Node(package='rokey1', executable='putty_task_server', output='screen',
+                    sigterm_timeout='30')] if start_server == 'true' else [])
     return [
+        *server,
         RegisterEventHandler(OnProcessExit(
             target_action=returning,
             on_exit=lambda event, ctx: after_return(event, initialize),
@@ -55,6 +60,7 @@ def launch_sequence(context):
 
 def generate_launch_description():
     defaults = {
+        'start_action_server': ('true', 'Start putty action server unless already running'),
         'execute_motion': ('false', 'Required execution opt-in on virtual controller'),
         'transfer_speed': ('30.0', 'Return transfer speed (mm/s)'),
         'place_speed': ('10.0', 'Return descent/retreat speed (mm/s)'),

@@ -18,6 +18,7 @@ import time
 from .contact_search import (
     WallForceHold, PressForceMonitor, wait_for_press_force, checked_force, press_force_request,
 )
+from .singularity_guard import SingularityDetected, start_singularity_watch
 
 from .putty_geometry import (
     EDGE_OFFSET, EXPECTED_TCP, ROBOT_ID, START_XY, END_XY, SURFACE_Z,
@@ -138,6 +139,10 @@ def run_robot(args, motion_builder, use_j6=False, allow_real=False,
     node = None
     hold = None
     force_monitor = None
+    watch = None
+    cleaning_up = False
+    motion_started = False
+    guard_enabled = getattr(args, 'singularity_guard', False)
     try:
         node = rclpy.create_node('apply_putty_plane',
                                  namespace=ROBOT_ID)
@@ -152,12 +157,20 @@ def run_robot(args, motion_builder, use_j6=False, allow_real=False,
             from dsr_msgs2.srv import MoveSplineTask
             spline = node.create_client(MoveSplineTask, f'{prefix}/motion/move_spline_task')
             clients += (spline,)
-        if contact_probe is not None:
+        if contact_probe is not None or guard_enabled:
             from dsr_msgs2.srv import GetToolForce, MoveStop, GetRobotState
             force = node.create_client(GetToolForce, f'{prefix}/aux_control/get_tool_force')
             stop = node.create_client(MoveStop, f'{prefix}/motion/move_stop')
             state = node.create_client(GetRobotState, f'{prefix}/system/get_robot_state')
             clients += (force, stop, state)
+        if guard_enabled:
+            from dsr_msgs2.srv import SetSingularityHandling, SetSingularHandlingForce
+            avoid = node.create_client(SetSingularityHandling, f'{prefix}/motion/set_singularity_handling')
+            force_policy = node.create_client(SetSingularHandlingForce,
+                                             f'{prefix}/motion/set_singular_handling_force')
+            for client in (avoid, force_policy):
+                if not client.wait_for_service(timeout_sec=5.0):
+                    raise RuntimeError('특이점 정책 서비스 없음. 이동하지 않습니다.')
         if press_force is not None:
             if contact_probe is None:
                 raise ValueError('도포 힘 유지는 접촉 탐색이 먼저 필요합니다.')
@@ -172,11 +185,21 @@ def run_robot(args, motion_builder, use_j6=False, allow_real=False,
         ServiceWaiter(node).wait(*clients)
 
         def call(client, request, step, timeout=5.0):
+            if watch is not None and not cleaning_up:
+                watch.check()
             # 요청 전송은 비동기지만, 바로 아래 spin으로 응답을 기다려 작업 순서를 보장한다.
             future = client.call_async(request)
-            rclpy.spin_until_future_complete(node, future, timeout_sec=timeout)
-            if not future.done():
-                raise TimeoutError(f'{step} 응답 시간 초과. 이동 취소는 수행하지 않습니다.')
+            deadline = time.monotonic()+timeout
+            # 긴 동기 이동 대기도 짧게 나눠, 별도 스레드가 받은 특이점 알람에 반응한다.
+            while not future.done():
+                if watch is not None and not cleaning_up:
+                    watch.check()
+                remaining = deadline-time.monotonic()
+                if remaining <= 0:
+                    raise TimeoutError(f'{step} 응답 시간 초과. 정지 절차를 확인하세요.')
+                rclpy.spin_until_future_complete(node, future, timeout_sec=min(0.05, remaining))
+            if watch is not None and not cleaning_up:
+                watch.check()
             result = future.result()
             # success는 서비스 처리 결과다. 실제 힘 도달/실제 파지는 별도로 확인해야 한다.
             if result is None or not result.success:
@@ -196,12 +219,14 @@ def run_robot(args, motion_builder, use_j6=False, allow_real=False,
             return values(rows[0].data[:6] if rows else ())
 
         def move_line(step, target, speed):
+            nonlocal motion_started
             print(f'[{step}] BASE [{format_values(target)}] | {speed:g} mm/s', flush=True)
             request = MoveLine.Request()
             request.pos = list(target)
             request.vel = [speed, 10.0]
             request.acc = [args.acceleration, 20.0]
             request.ref = request.mode = request.sync_type = 0
+            motion_started = True  # 응답 전 오류여도 명령 수신 여부가 불확실하므로 정지한다.
             call(line, request, step, timeout=120.0)
             actual = read_pose()
             if (math.dist(actual[:3], target[:3]) > 2.0 or
@@ -238,17 +263,21 @@ def run_robot(args, motion_builder, use_j6=False, allow_real=False,
                     f' | 크기차이(목표-|실측|)={error} N'
                     f' | TCP_XYZ=[{format_values(actual[:3])}] mm'
                     f' | TCP_ABC=[{format_values(actual[3:])}] deg{angle}')
+            except SingularityDetected:
+                raise
             except Exception as exc:
                 node.get_logger().warning(f'[힘진단] 단계={stage} 로그 조회 실패: {exc}')
 
         # sync_type=1은 로봇 이동 완료를 기다리지 않는다는 뜻이다. 이동 중 힘을 감시하려고 사용한다.
         def move_async(target, speed):
+            nonlocal motion_started
             request = MoveLine.Request()
             request.pos = list(target)
             request.vel = [speed, 10.0]
             request.acc = [args.acceleration, 20.0]
             request.ref = request.mode = 0
             request.sync_type = 1
+            motion_started = True
             call(line, request, '유한 거리 접촉 탐색', timeout=0.5)
 
         def stop_and_wait():
@@ -275,7 +304,8 @@ def run_robot(args, motion_builder, use_j6=False, allow_real=False,
             call(compliance, request, 'BASE 컴플라이언스 시작')
 
         def set_press_force(value):
-            request = press_force_request(value)
+            mode = 0 if getattr(args, 'force_mode', 'relative') == 'absolute' else 1
+            request = press_force_request(value, mode=mode)
             call(desired, request, f'BASE +X {value:g} N 힘 유지')
 
         def release_press_force():
@@ -293,6 +323,22 @@ def run_robot(args, motion_builder, use_j6=False, allow_real=False,
             raise RuntimeError('이 도포 실행은 가상 컨트롤러에서만 허용합니다.')
         if call(tcp, GetCurrentTcp.Request(), 'TCP 확인').info != EXPECTED_TCP:
             raise RuntimeError(f'{EXPECTED_TCP} TCP를 적용하세요.')
+        if guard_enabled:
+            watch = start_singularity_watch(ROBOT_ID)
+            watch.wait_ready()
+            from utils.singularity import apply as apply_singularity
+            def set_singularity_mode(mode):
+                request = SetSingularityHandling.Request()
+                request.mode = mode
+                call(avoid, request, f'팀 YAML 특이점 정책 mode={mode} 적용')
+                return 0
+            configured_mode = apply_singularity(SimpleNamespace(set_singularity_handling=set_singularity_mode))
+            request = SetSingularHandlingForce.Request()
+            request.mode = 0  # DR_SINGULARITY_ERROR: 특이점 내 힘 제어 에러 무시 금지.
+            call(force_policy, request, '힘 제어 특이점 에러 차단 적용')
+            print(f'[특이점] 팀 YAML 정책 mode={configured_mode} 적용 / 힘 제어 ERROR 정책 적용 / '
+                  f'/{ROBOT_ID}/error 감시 시작. 진입 시 정지·힘 해제; 자동 MoveJ 회복 없음.',
+                  flush=True)
         current = read_pose()
         # 실행 직전 현재 TCP를 기준으로 전체 경로를 구성한다.
         moves = list(motion_builder(read_pose(), args))
@@ -305,6 +351,7 @@ def run_robot(args, motion_builder, use_j6=False, allow_real=False,
                       f'{command.speed:g} mm/s', flush=True)
                 points = tuple((*(p[i]+shift[i] for i in range(3)), *p[3:]) for p in command.poses)
                 request = spline_request(points, command.speed, args.acceleration)
+                motion_started = True
                 if hold is not None and hold.active:
                     if force_monitor is None or not force_monitor.ready:
                         raise RuntimeError('실측 힘 안정 확인 없이 상향 도포를 시작할 수 없습니다.')
@@ -388,18 +435,28 @@ def run_robot(args, motion_builder, use_j6=False, allow_real=False,
                         print(f'[힘검증] 실측 힘 안정 확인 완료 → +X {selected_force:g} N '
                               '명령을 유지하며 상향 도포',
                               flush=True)
+        if watch is not None:
+            watch.check()
         print('평면 도포 완료', flush=True)
     finally:
+        failed = sys.exc_info()[0] is not None
+        # 감지 알람이 정지/힘 해제 요청 자체를 막지 않도록 정리 중에는 감시 판정을 생략한다.
+        cleaning_up = True
         try:
-            if hold is not None and hold.active:
+            if (hold is not None and hold.active) or (motion_started and failed):
                 if node is not None:
-                    node.get_logger().warning('[힘검증] 작업 중단: 정지 요청 후 힘/컴플라이언스 해제')
+                    node.get_logger().warning('[작업중단] 정지 확인 후 활성 힘/컴플라이언스 해제')
                 try:
                     stop_and_wait()
                 finally:
-                    hold.release()
+                    if hold is not None and hold.active:
+                        hold.release()
         finally:
-            safe_shutdown(node)
+            try:
+                if watch is not None:
+                    watch.close()
+            finally:
+                safe_shutdown(node)
 
 
 # 기존 가상 geometry 스쿱을 위한 서비스 실행부다.
