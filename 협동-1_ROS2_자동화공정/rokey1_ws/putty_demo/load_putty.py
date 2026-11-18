@@ -82,17 +82,6 @@ def approach_pose(args):
     return tuple(p)
 
 
-def clockwise_xy_waypoint(start, target, offset):
-    """시작-목표 직선의 BASE -Z 쪽으로 부풀린 XY 경유점."""
-    dx, dy = target[0]-start[0], target[1]-start[1]
-    length = math.hypot(dx, dy)
-    if length <= 1e-6:
-        raise ValueError('시계방향 이송을 위한 XY 이동 거리가 없습니다.')
-    x = (start[0]+target[0])*0.5 - dy/length*offset
-    y = (start[1]+target[1])*0.5 + dx/length*offset
-    return (x, y, target[2], *target[3:])
-
-
 def execute(io, args):
     """IO 주입 가능한 작업 순서. Z는 힘, X는 위치. 센서 값으로 출발/유지 판정한다."""
     actual = tuple(io.read_pose())
@@ -111,10 +100,7 @@ def execute(io, args):
             io.move_line((*actual[:2], height, *actual[3:]), args.transfer_speed)
             raised_joints = io.read_joints()
             target = (*above[:2], height, *above[3:])
-            waypoint = clockwise_xy_waypoint(actual, target, 100.0)
-            io.log('판 이송 시계방향 경유점 (MoveJoint)', waypoint, checked_force(io.read_force()))
-            io.move_joint_pose(waypoint)
-            io.log('판 위 목표점 관절 이송 (MoveJoint)', target, checked_force(io.read_force()))
+            io.log('판 위 관절 이송 (MoveJoint)', target, checked_force(io.read_force()))
             io.move_joint_pose(target)
             io.move_line(above, args.transfer_speed)
         moved = True  # 응답 실패 시에도 컨트롤러가 수신했을 가능성이 있어 정지한다.

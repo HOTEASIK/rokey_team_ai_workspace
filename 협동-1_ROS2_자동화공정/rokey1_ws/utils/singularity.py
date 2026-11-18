@@ -14,8 +14,4 @@ MODES = {'avoid': 0, 'task_stop': 1, 'var_vel': 2}   # DR_AVOID / DR_TASK_STOP /
 
 def apply(dsr):
     """공정 노드 시작 시 1회 호출."""
-    mode = MODES[CFG['util']['singularity']['mode']]
-    result = dsr.set_singularity_handling(mode)
-    if result is False or (isinstance(result, int) and result < 0):
-        raise RuntimeError('특이점 처리 정책 적용 실패')
-    return mode
+    dsr.set_singularity_handling(MODES[CFG['util']['singularity']['mode']])

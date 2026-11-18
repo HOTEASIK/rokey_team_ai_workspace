@@ -1,21 +1,20 @@
--- 모델 입력 추가: 틈 특징 + 힘 시계열 (기존 데이터 유지)
--- 실행: mysql -u cobot -pcobot < ~/ws_cobot_pjt/ws_dsr/src/rokey1_ws/db/migrate_02.sql   (한 번만)
--- 새로 만들 때도 schema.sql 다음에 이 파일을 실행한다
+-- 웹(hmi_server) 직접 실행 구조로 변경: command 삭제, run 에 실행 정보 통합 (2026-11-18)
+-- 실행: mysql -u cobot -pcobot < ~/ws_cobot_pjt/ws_dsr/src/rokey1/db/migrate_02.sql   (한 번만, 백업 후)
 USE cobot;
 
--- 1) 틈 특징. 길이·방향은 좌표로 자동 계산, 폭·깊이는 측정한 경우만 (NULL 허용)
-ALTER TABLE gap
-  ADD COLUMN length_mm DOUBLE AS (SQRT(POW(end_x - start_x, 2) + POW(end_y - start_y, 2) + POW(end_z - start_z, 2))) STORED,
-  ADD COLUMN orient    CHAR(1) AS (IF(ABS(end_z - start_z) > SQRT(POW(end_x - start_x, 2) + POW(end_y - start_y, 2)), 'V', 'H')) STORED,  -- H 가로 / V 세로
-  ADD COLUMN width_mm  FLOAT NULL,
-  ADD COLUMN depth_mm  FLOAT NULL;   -- 작업 전 깊이 (작업 후 깊이는 quality.depth_mm)
+DROP TABLE IF EXISTS command;
 
--- 2) 힘 시계열 (요약값으로 부족할 때 원인 분석용). 퍼티·샌딩 접촉 구간만, 10~20Hz
-CREATE TABLE IF NOT EXISTS force_trace (
-  log_id INT NOT NULL,
-  t_ms   INT NOT NULL,                -- 세부동작 시작부터 ms
-  fx FLOAT, fy FLOAT, fz FLOAT,
-  mx FLOAT, my FLOAT, mz FLOAT,
-  PRIMARY KEY (log_id, t_ms),
-  FOREIGN KEY (log_id) REFERENCES task_log(log_id)
-);
+ALTER TABLE run
+  MODIFY run_id INT AUTO_INCREMENT,
+  MODIFY result VARCHAR(20),
+  ADD COLUMN task       VARCHAR(10) AFTER run_id,     -- ALL / EXPLORE / PUTTY / SANDING
+  ADD COLUMN gap_id     INT NULL AFTER task,          -- PUTTY/SANDING 단독 실행 때 지정한 틈
+  ADD COLUMN mode       VARCHAR(10) AFTER material,   -- virtual / real
+  ADD COLUMN data_check VARCHAR(200) AFTER result;    -- OK 또는 빠진 데이터 목록
+
+-- 예전 task_log/wall 의 run_id 와 겹치지 않게 그 다음 번호부터 시작
+SET @n = (SELECT GREATEST(IFNULL(MAX(run_id), 0), (SELECT IFNULL(MAX(run_id), 0) FROM wall)) + 1 FROM task_log);
+SET @sql = CONCAT('ALTER TABLE run AUTO_INCREMENT=', @n);
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;

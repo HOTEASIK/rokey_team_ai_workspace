@@ -8,9 +8,9 @@ const BAD_STATES = new Set([3, 5, 6, 9, 10]);
 const REACH = 900; // M0609 reach (mm)
 
 // ----- 화면 표시용 한글 변환 (내부 코드는 영어 그대로) -----
-const KIND_KO = { process: '노드', service: '상시 실행', action: '액션' };
+const KIND_KO = { process: '노드', service: '상시 실행', action: '액션', db: 'DB 기록' };
 const MODE_KO = { virtual: '가상', real: '실제 로봇' };
-const GROUP_KO = { navigation: '벽면 탐색', putty: '퍼티', sanding: '샌딩' };
+const GROUP_KO = { navigation: '벽면 탐색', putty: '퍼티', sanding: '샌딩', process: '공정' };
 const RUN_KO = { starting: '시작 중', running: '실행 중', done: '완료', failed: '실패', stopped: '정지', killed: '강제 종료' };
 const STATUS_KO = { IDLE: '대기', RUNNING: '실행 중', INPUT: '입력 대기', ERROR: '오류', FAULT: '고장', 'E-STOP': '비상 정지' };
 const TYPE_KO = { INFO: '정보', WARN: '경고', ERROR: '오류' };
@@ -21,7 +21,7 @@ const ko = (map, v) => map[v] ?? v;
 
 const ui = {
   tasks: [],
-  group: 'navigation',
+  group: 'process',
   taskId: null,
   mode: 'virtual',
   values: {},          // task_id → {key: value}
@@ -143,7 +143,7 @@ function setMode(mode) {
 }
 
 function saveUi() {
-  try { localStorage.setItem('rokey1-hmi', JSON.stringify({ group: ui.group, taskId: ui.taskId, mode: ui.mode, values: ui.values, layout: ui.layout, alertOn: ui.alertOn, page: ui.page })); } catch (e) { /* ignore */ }
+  try { localStorage.setItem('rokey1-hmi', JSON.stringify({ group: ui.group, taskId: ui.taskId, mode: ui.mode, values: ui.values, layout: ui.layout, alertOn: ui.alertOn, page: ui.page, uiMode: ui.uiMode })); } catch (e) { /* ignore */ }
 }
 function loadUi() {
   try { Object.assign(ui, JSON.parse(localStorage.getItem('rokey1-hmi')) || {}); } catch (e) { /* ignore */ }
@@ -275,13 +275,21 @@ function clearAlerts() {
 // ------------------------------------------------------------------ 페이지 (작업 제어판 / 실시간 작업 현황)
 const PAGES = ['control', 'monitor'];
 function setPage(page, push = true) {
-  ui.page = PAGES.includes(page) ? page : 'control';
+  ui.page = PAGES.includes(page) && ui.uiMode !== 'simple' ? page : 'control';
   $('workspace').dataset.page = ui.page;
   document.querySelectorAll('.page-tab').forEach((b) => b.classList.toggle('active', b.dataset.page === ui.page));
   if (push && location.hash !== `#${ui.page}`) history.replaceState(null, '', `#${ui.page}`);
   if (ui.page === 'monitor') { const box = $('consoleLog'); if ($('autoScroll').checked) box.scrollTop = box.scrollHeight; }
   window.scrollTo(0, 0);
   saveUi();
+}
+
+// ------------------------------------------------------------------ 간편 / 전문가 모드
+function setUiMode(mode) {
+  ui.uiMode = mode === 'expert' ? 'expert' : 'simple';
+  document.body.classList.toggle('simple', ui.uiMode === 'simple');
+  document.querySelectorAll('[data-uimode]').forEach((b) => b.classList.toggle('active', b.dataset.uimode === ui.uiMode));
+  if (ui.uiMode === 'simple') setPage('control'); else saveUi();
 }
 
 // ------------------------------------------------------------------ 화면 배치
@@ -712,6 +720,7 @@ function bind() {
   $('homeBtn').addEventListener('click', goHome);
   document.querySelectorAll('.page-tab').forEach((b) => b.addEventListener('click', () => setPage(b.dataset.page)));
   window.addEventListener('hashchange', () => setPage(location.hash.slice(1), false));
+  document.querySelectorAll('[data-uimode]').forEach((b) => b.addEventListener('click', () => setUiMode(b.dataset.uimode)));
   $('monStopBtn').addEventListener('click', () => stopRun(null));
   $('monEstopBtn').addEventListener('click', toggleEstop);
   $('resetParamsBtn').addEventListener('click', resetParams);
@@ -742,6 +751,7 @@ async function init() {
   setMode(ui.mode === 'real' ? 'real' : 'virtual');
   setLayout(ui.layout);
   setPage(PAGES.includes(location.hash.slice(1)) ? location.hash.slice(1) : ui.page);
+  setUiMode(ui.uiMode);
   $('alertPopup').checked = ui.alertOn !== false;
   ui.alertOn = ui.alertOn !== false;
   ui.speedDragging = false;
@@ -766,7 +776,7 @@ async function init() {
       await new Promise((r) => setTimeout(r, 2000));
     }
   }
-  if (!['navigation', 'putty', 'sanding'].includes(ui.group)) ui.group = 'navigation';
+  if (!['navigation', 'putty', 'sanding', 'process'].includes(ui.group)) ui.group = 'process';
   renderTaskList();
   connect();
 }

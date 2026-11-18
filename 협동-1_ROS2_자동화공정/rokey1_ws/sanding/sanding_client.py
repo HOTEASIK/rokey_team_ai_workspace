@@ -22,6 +22,7 @@ import rclpy
 from rclpy.action import ActionClient
 from rclpy.signals import SignalHandlerOptions
 
+# 팀 레포(rokey1)로 옮길 때는 rokey_interfaces 로 바꾸면 됩니다
 from rokey_interfaces.action import ToolTask
 
 from sanding.sanding_job import ROBOT_ID
@@ -35,7 +36,7 @@ DEFAULT_END_POSX = [0.0] * 6
 def main(args=None):
     # Ctrl+C 때 rclpy 가 먼저 종료되면 취소 요청을 못 보내므로 기본 핸들러 끔
     rclpy.init(args=args, signal_handler_options=SignalHandlerOptions.NO)
-    node = rclpy.create_node("sanding_client", namespace=ROBOT_ID)
+    node = rclpy.create_node("rokey1_sanding_client", namespace=ROBOT_ID)
     log = node.get_logger()
     p = node.declare_parameter
     goal = ToolTask.Goal()

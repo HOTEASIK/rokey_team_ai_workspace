@@ -1,6 +1,6 @@
 # sun_gear 트러블슈팅 기록
 
-- 대상: `src/rokey1_ws/rokey1/sun_gear.py` (`ros2 run rokey1 sun_gear`)
+- 대상: `src/rokey1/rokey1/sun_gear.py` (`ros2 run rokey1 sun_gear`)
 - 원본: DART 에서 만든 `m0609_pick_3.drl` 을 ROS 2 (DSR_ROBOT2) 로 옮긴 코드
 - 환경: Doosan M0609 + RG2 그리퍼, 실제 로봇 (`mode:=real host:=192.168.1.100`)
 - 날짜: 2026-11-12

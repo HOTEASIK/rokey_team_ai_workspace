@@ -8,6 +8,8 @@
   2) 작업 실행/정지 : navigation / putty_demo / sanding 노드를 `ros2 run rokey1 ...` 로 띄우고
                       출력(로그)을 실시간으로 화면에 전달. y/Enter 같은 입력(stdin)도 전달.
   3) sanding goal   : /dsr01/tool_task 액션에 직접 goal 을 보내고 feedback(step/stage) 을 진행률로 표시
+  3-1) 공정(DB)     : [공정] 탭 작업(kind=db)은 /process/* 액션을 직접 호출하고 결과를 MySQL 에 기록
+                      (hmi/process_runner.py, DB 에 쓰는 곳은 hmi_server 하나뿐)
   4) 로봇 상태      : DSR 서비스(get_robot_state / get_current_posx / get_tool_force) 를 주기적으로 조회,
                       /dsr01/joint_states, /dsr01/error 구독
   5) 비상 정지      : move_stop(DR_QSTOP) → 실행 중인 작업 프로세스 강제 종료(SIGKILL, 자동 홈 복귀 방지)
@@ -50,6 +52,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import rclpy
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
+from rclpy.signals import SignalHandlerOptions
 from rclpy.callback_groups import ReentrantCallbackGroup
 from sensor_msgs.msg import JointState
 
@@ -69,6 +72,12 @@ try:
     HAVE_TOOL_TASK = True
 except ImportError:
     HAVE_TOOL_TASK = False
+
+try:
+    from hmi.process_runner import ProcessRunner
+except ImportError as e:      # pymysql / rokey_interfaces 없음
+    ProcessRunner = None
+    PROCESS_IMPORT_ERROR = str(e)
 
 try:
     from onrobot_rg_msgs.srv import SetCommand
@@ -188,6 +197,7 @@ class TaskManager:
         self.estop = False
         self.speed_pct = SPEED_DEFAULT
         self.speed_unlocked = False
+        self.runner = None
 
     # ------------------------------------------------------------------ 속도
     def speed_json(self):
@@ -257,6 +267,12 @@ class TaskManager:
 
         if task['kind'] == 'action':
             self._start_action(run)
+        elif task['kind'] == 'db':
+            if self.runner is None:
+                with self.lock:
+                    self.runs.remove(run)
+                raise RuntimeError(f'DB 공정 실행 불가: {PROCESS_IMPORT_ERROR}')
+            threading.Thread(target=self._run_db, args=(run,), daemon=True).start()
         else:
             commands = task['build'](mode, params)
             threading.Thread(target=self._run_commands, args=(run, commands), daemon=True).start()
@@ -278,6 +294,21 @@ class TaskManager:
 
     def _changed(self):
         self.hub.publish('runs', self.snapshot())
+
+    def _run_db(self, run):
+        run.state = 'running'
+        self._changed()
+        try:
+            result = self.runner.run(run, lambda: self.estop)
+        except Exception as e:
+            self.hub.log('ERROR', 'DB', f'공정 실행 오류: {e}', run_id=run.id)
+            result = 'E_DB'
+        if result == 'OK':
+            self._finish(run, 'done')
+        elif run.stop_requested:
+            self._finish(run, 'killed' if self.estop else 'stopped')
+        else:
+            self._finish(run, 'failed')
 
     def _finish(self, run, state, returncode=None):
         with run.lock:
@@ -391,7 +422,7 @@ class TaskManager:
             raise RuntimeError('정지할 실행 중인 작업이 없습니다.')
         for run in targets:
             run.stop_requested = True
-            if run.task['kind'] == 'action':
+            if run.task['kind'] in ('action', 'db'):
                 self.ros.cancel_goal(run)
             elif run.proc is not None:
                 self._signal(run, sig)
@@ -430,7 +461,7 @@ class TaskManager:
         self.ros.move_stop()
         for run in self.active_runs():
             run.stop_requested = True
-            if run.task['kind'] == 'action':
+            if run.task['kind'] in ('action', 'db'):
                 self.ros.cancel_goal(run)
                 self._finish(run, 'killed')
             else:
@@ -639,9 +670,8 @@ class HmiNode(Node):
         p = run.params
         goal = ToolTask.Goal()
         goal.tool_id = int(p['tool_id'])
-        # 시작을 비우면 전부 0 → sanding_server 가 기본 작업 (정해 둔 시작 관절각 + 10cm)
-        goal.start_posx = parse_posx(p['start_posx']) if p['start_posx'] else [0.0] * 6
-        goal.end_posx = parse_posx(p['end_posx']) if p['start_posx'] else [0.0] * 6
+        goal.start_posx = parse_posx(p['start_posx'])
+        goal.end_posx = parse_posx(p['end_posx'])
         goal.return_tool = bool(p['return_tool'])
         run.command = (f'tool_task goal tool_id={goal.tool_id} start={list(goal.start_posx)} '
                        f'end={list(goal.end_posx)} return_tool={goal.return_tool}')
@@ -818,6 +848,8 @@ class HmiApp:
         self.node = HmiNode(self.hub)
         self.manager = TaskManager(self.hub, self.node)
         self.node.manager = self.manager
+        if ProcessRunner is not None:
+            self.manager.runner = ProcessRunner(self.node, self.hub)
         self.web_root = find_web_root(self.node.web_root)
         self.running = True
 
@@ -831,7 +863,8 @@ class HmiApp:
 
 
 def main(args=None):
-    rclpy.init(args=args)
+    # rclpy 가 SIGTERM 을 받으면 ROS 만 끄고 웹 서버는 계속 돌아서 8080 을 잡고 있었다 → 신호는 직접 처리
+    rclpy.init(args=args, signal_handler_options=SignalHandlerOptions.NO)
     app = HmiApp()
     log = app.node.get_logger()
 
@@ -841,6 +874,8 @@ def main(args=None):
 
     server = ThreadingHTTPServer((app.node.host, app.node.port), make_handler(app))
     server.daemon_threads = True
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        signal.signal(sig, lambda *_: threading.Thread(target=server.shutdown, daemon=True).start())
     log.info(f'HMI web root : {app.web_root}')
     log.info(f'HMI 접속 주소 : http://{"localhost" if app.node.host in ("0.0.0.0", "127.0.0.1") else app.node.host}'
              f':{app.node.port}')

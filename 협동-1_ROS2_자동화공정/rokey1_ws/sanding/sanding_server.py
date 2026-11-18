@@ -1,5 +1,9 @@
 """샌딩 액션 서버 - 팀 HMI(hmi_server) 형식에 맞춤 (MoveIt 미사용, 두산 순응/힘제어)
 
+액션: /process/sanding  (Process) ← hmi_server [공정(DB)] 가 틈마다 보냄
+  Goal    : start_point[3], end_point[3] (DB gap 좌표) → 자세는 TOOL_POSX[1] 자세 + PROCESS_NORMAL 로 보정
+  Feedback: 단계(phase)가 끝날 때마다 1회 (→ task_log 1줄), Result: success, error_code, message
+
 액션: /dsr01/tool_task  (ToolTask) ← HMI 의 [샌딩 작업 실행] 이 보내는 이름/형식 그대로
   Goal    : tool_id, start_posx[6], end_posx[6], return_tool  (+ surface_normal[3], 선택)
   Result  : success, message
@@ -23,11 +27,12 @@
   (터미널 1) sod && sodreal
   (터미널 2) sod && ros2 run rokey1 sanding_server
   (터미널 3) HMI 의 [샌딩 작업 실행]  또는  sod && ros2 run rokey1 sanding_client
-  ※ 예전 tool_task_server 와 동시에 띄우지 마세요
+  ※ HMI 의 [샌딩 액션 서버] 버튼(= 이 sanding_server)을 두 번 띄우지 마세요
     (같은 /dsr01/tool_task 이름)
 """
 import math
 import threading
+import time
 
 import rclpy
 import DR_init
@@ -35,7 +40,7 @@ from rclpy.action import ActionServer, CancelResponse, GoalResponse
 from rclpy.callback_groups import ReentrantCallbackGroup
 from rclpy.executors import MultiThreadedExecutor
 
-from rokey_interfaces.action import ToolTask
+from rokey_interfaces.action import Process, ToolTask
 
 from sanding.sanding_job import (FLOOR_CLEAR_MM, PRESS_FORCE_MAX_N, PRESS_FORCE_MIN_N, PRESS_FORCE_N, ROBOT_ID, TOOL_RADIUS_MM, Abort, Canceled, PlanError,
                                   SandingJob)
@@ -60,6 +65,12 @@ DEFAULT_WORK_VECTOR = [0.0, 100.0, 0.0]                                 # 베이
 FLOOR_Z_MM = 35.0
 
 
+# /process/sanding 벽 법선 (벽 → 로봇 방향). 지금은 벽이 BASE +X 쪽에 있다고 가정해 고정.
+# TODO(나중에 변경): 탐색 결과(DB wall 네 모서리)에서 벽 평면 법선을 계산해 넘기도록 바꿀 것
+PROCESS_NORMAL = [-1.0, 0.0, 0.0]
+PROCESS_TOOL_ID = 1
+
+
 def goal_normal(goal):
     """goal 의 surface_normal (팀 ToolTask 에는 필드가 없음). 0 벡터/없음 → None (자동 판단)"""
     n = [float(v) for v in getattr(goal, "surface_normal", [])]   # numpy 배열로 올 수 있음
@@ -74,10 +85,10 @@ def is_default(goal):
 class SandingServer:
     def __init__(self):
         # 로봇 제어 노드 (executor 에 넣지 않음 - DSR_ROBOT2 가 직접 spin)
-        self.dsr_node = rclpy.create_node("sanding_dsr", namespace=ROBOT_ID)
+        self.dsr_node = rclpy.create_node("rokey1_sanding_dsr", namespace=ROBOT_ID)
         setattr(DR_init, "__dsr__node", self.dsr_node)
         # 액션 노드 (executor 에서 spin)
-        self.node = rclpy.create_node("sanding_server", namespace=ROBOT_ID)
+        self.node = rclpy.create_node("rokey1_sanding_server", namespace=ROBOT_ID)
         self.log = self.node.get_logger()
         retreat = bool(self.node.declare_parameter("retreat_on_cancel", False).value)
         go_home = bool(self.node.declare_parameter("go_home", False).value)
@@ -88,6 +99,7 @@ class SandingServer:
         self.node.declare_parameter("press_force", PRESS_FORCE_N)
 
         self._gh = None
+        self._process, self._phase, self._t0 = False, 0, 0.0
         self.job = SandingJob(self.dsr_node, self.log,
                               is_canceled=lambda: self._gh is not None and self._gh.is_cancel_requested,
                               on_step=self._feedback, retreat_on_cancel=retreat,
@@ -104,18 +116,35 @@ class SandingServer:
             cancel_callback=self.cancel_callback,
             callback_group=ReentrantCallbackGroup(),   # 실행 중에도 취소 요청 받기
         )
+        self.process_server = ActionServer(
+            self.node, Process, "/process/sanding",
+            execute_callback=self.process_execute,
+            goal_callback=self.process_goal,
+            cancel_callback=self.cancel_callback,
+            callback_group=ReentrantCallbackGroup(),
+        )
 
     def _feedback(self, step, total, text):
-        if self._gh is not None:
-            fb = ToolTask.Feedback()
-            fb.step, fb.total_steps, fb.stage = step, total, text
-            self._gh.publish_feedback(fb)
+        if self._gh is None:
+            return
+        if self._process:
+            if step != self._phase:
+                self._phase_done(True)
+                self._phase, self._t0 = step, time.monotonic()
+            return
+        fb = ToolTask.Feedback()
+        fb.step, fb.total_steps, fb.stage = step, total, text
+        self._gh.publish_feedback(fb)
 
-    def goal_callback(self, goal):
-        if TOOL_POSX.get(goal.tool_id) is None:
-            self.log.error(f"tool_id={goal.tool_id}: 등록되지 않은 도구 (TOOL_POSX 확인)")
-            return GoalResponse.REJECT
-        values = list(goal.start_posx) + list(goal.end_posx) + list(getattr(goal, "surface_normal", []))
+    def _phase_done(self, ok, code="", reason=""):
+        """Process 피드백: 직전 단계(phase) 1개가 끝났음을 알림"""
+        if self._phase:
+            self._gh.publish_feedback(Process.Feedback(
+                state="RUNNING" if ok else "ERROR", step=f"sanding_{self._phase:02d}",
+                step_success=ok, error_code=code, fail_reason=reason,
+                duration_ms=int((time.monotonic() - self._t0) * 1000)))
+
+    def _accept(self, values, text):
         if not all(math.isfinite(v) for v in values):
             self.log.error("goal 에 NaN/inf 값이 있습니다.")
             return GoalResponse.REJECT
@@ -124,60 +153,89 @@ class SandingServer:
                 self.log.warn("이미 작업 중 - 새 goal 거절")
                 return GoalResponse.REJECT
             self._busy = True
+        self.log.info(f"goal 수신: {text}")
+        return GoalResponse.ACCEPT
+
+    def goal_callback(self, goal):
+        if TOOL_POSX.get(goal.tool_id) is None:
+            self.log.error(f"tool_id={goal.tool_id}: 등록되지 않은 도구 (TOOL_POSX 확인)")
+            return GoalResponse.REJECT
         where = (f"기본 작업 (시작 관절 {DEFAULT_START_POSJ}, +{DEFAULT_WORK_VECTOR} mm)" if is_default(goal)
                  else f"start={list(goal.start_posx)}, end={list(goal.end_posx)}")
-        self.log.info(f"goal 수신: tool={goal.tool_id}, {where}, normal={goal_normal(goal) or '자동'}, "
-                      f"return_tool={goal.return_tool}")
-        return GoalResponse.ACCEPT
+        return self._accept(list(goal.start_posx) + list(goal.end_posx) + list(getattr(goal, "surface_normal", [])),
+                            f"tool={goal.tool_id}, {where}, normal={goal_normal(goal) or '자동'}, "
+                            f"return_tool={goal.return_tool}")
+
+    def process_goal(self, goal):
+        return self._accept(list(goal.start_point) + list(goal.end_point),
+                            f"/process/sanding run={goal.run_id} gap={goal.gap_id}, "
+                            f"start={list(goal.start_point)}, end={list(goal.end_point)}, normal={PROCESS_NORMAL}")
 
     def cancel_callback(self, goal_handle):
         self.log.warn("취소 요청 수신 - 이동 중이면 즉시 정지합니다.")
         return CancelResponse.ACCEPT
 
     def execute_callback(self, goal_handle):
-        self._gh = goal_handle
         g = goal_handle.request
-        result = ToolTask.Result()
+        self._process = False
+        if is_default(g):
+            ok, msg, _ = self._job(goal_handle, TOOL_POSX[g.tool_id], None, None, goal_normal(g), g.return_tool,
+                                   start_posj=DEFAULT_START_POSJ, work_vector=DEFAULT_WORK_VECTOR)
+        else:
+            ok, msg, _ = self._job(goal_handle, TOOL_POSX[g.tool_id], list(g.start_posx), list(g.end_posx),
+                                   goal_normal(g), g.return_tool)
+        return ToolTask.Result(success=ok, message=msg)
+
+    def process_execute(self, goal_handle):
+        g = goal_handle.request
+        tool = TOOL_POSX[PROCESS_TOOL_ID]
+        self._process, self._phase, self._t0 = True, 0, time.monotonic()
+        ok, msg, code = self._job(goal_handle, tool, list(g.start_point) + tool[3:], list(g.end_point) + tool[3:],
+                                  PROCESS_NORMAL, True)
+        return Process.Result(success=ok, error_code=code, message=msg)
+
+    def _job(self, goal_handle, tool, start, end, normal, return_tool, **kw):
+        """SandingJob 실행. 반환: (성공, 메시지, Process 오류코드)"""
+        self._gh = goal_handle
         try:
             force = float(self.node.get_parameter("press_force").value)
             if not PRESS_FORCE_MIN_N <= force <= PRESS_FORCE_MAX_N:
                 raise PlanError(f"누르는 힘 {force} N 은 {PRESS_FORCE_MIN_N}~{PRESS_FORCE_MAX_N} N 이어야 합니다")
             self.job.press_force = force
             self.log.info(f"샌딩 누르는 힘: {force:.1f} N")
-            if is_default(g):
-                self.job.run(TOOL_POSX[g.tool_id], None, None, goal_normal(g), g.return_tool,
-                             start_posj=DEFAULT_START_POSJ, work_vector=DEFAULT_WORK_VECTOR)
-            else:
-                self.job.run(TOOL_POSX[g.tool_id], list(g.start_posx), list(g.end_posx),
-                             goal_normal(g), g.return_tool)
+            self.job.run(tool, start, end, normal, return_tool, **kw)
             goal_handle.succeed()
-            result.success, result.message = True, "완료"
+            ok, msg, code = True, "완료", ""
         except PlanError as e:
             goal_handle.abort()
-            result.success, result.message = False, f"계획 불가 (로봇 안 움직임): {e}"
+            ok, msg, code = False, f"계획 불가 (로봇 안 움직임): {e}", "E_SINGULAR"
         except Canceled as e:
             goal_handle.canceled()
-            result.success, result.message = False, f"취소됨 ('{e}'), 도구를 들고 있을 수 있음"
+            ok, msg, code = False, f"취소됨 ('{e}'), 도구를 들고 있을 수 있음", "CANCELED"
         except Abort as e:
             goal_handle.abort()
-            result.success, result.message = False, f"샌딩 중단 (후퇴 완료, 도구는 들고 있음): {e}"
+            ok, msg, code = False, f"샌딩 중단 (후퇴 완료, 도구는 들고 있음): {e}", "E_FORCE"
         except Exception as e:
             self.job.force_off()
+            ok = False
             if goal_handle.is_cancel_requested:
                 goal_handle.canceled()
-                result.message = f"취소/정지됨 (그 자리에서 멈춤, 도구를 들고 있을 수 있음): {e}"
+                msg, code = f"취소/정지됨 (그 자리에서 멈춤, 도구를 들고 있을 수 있음): {e}", "CANCELED"
             else:
                 goal_handle.abort()
-                result.message = f"오류 (그 자리에서 멈춤, 도구를 들고 있을 수 있음): {e}"
-            result.success = False
+                msg = f"오류 (그 자리에서 멈춤, 도구를 들고 있을 수 있음): {e}"
+                code = "E_GRIP" if "그리퍼" in str(e) else "E_MOTION"
         finally:
+            if self._process:
+                self._phase_done(ok, code, "" if ok else msg[:100])
             self._gh = None
             with self._lock:
                 self._busy = False
-        (self.log.info if result.success else self.log.error)(f"결과: {result.message}")
-        return result
+        (self.log.info if ok else self.log.error)(f"결과: {msg}")
+        return ok, msg, code
 
     def destroy(self):
+        self.process_server.destroy()
         self.action_server.destroy()
         self.node.destroy_node()
         self.dsr_node.destroy_node()
@@ -195,7 +253,7 @@ def main(args=None):
         return
     executor = MultiThreadedExecutor(num_threads=2)
     executor.add_node(server.node)
-    server.log.info(f"샌딩 액션 서버 시작: /{ROBOT_ID}/{ACTION_NAME} (HMI [샌딩 작업 실행] 대기)")
+    server.log.info(f"샌딩 액션 서버 시작: /{ROBOT_ID}/{ACTION_NAME}, /process/sanding")
     try:
         executor.spin()
     except KeyboardInterrupt:

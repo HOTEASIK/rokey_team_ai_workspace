@@ -6,21 +6,12 @@
     CFG['force']['putty_scrape']['target']
 """
 import os
-from pathlib import Path
 
 import yaml
 
-def default_path():
-    source = Path(__file__).resolve().parents[1] / 'config' / 'robot.yaml'
-    if source.is_file():
-        return str(source)
-    from ament_index_python.packages import get_package_share_directory
-    return str(Path(get_package_share_directory('rokey1')) / 'config' / 'robot.yaml')
-
-
-PATH = os.environ.get('ROKEY_CONFIG') or default_path()
+PATH = os.environ.get(
+    'ROKEY_CONFIG',
+    os.path.expanduser('~/ws_cobot_pjt/ws_dsr/src/rokey1/config/robot.yaml'))
 
 with open(PATH) as f:
     CFG = yaml.safe_load(f)
-if not isinstance(CFG, dict):
-    raise ValueError(f'설정 파일은 YAML mapping이어야 합니다: {PATH}')
