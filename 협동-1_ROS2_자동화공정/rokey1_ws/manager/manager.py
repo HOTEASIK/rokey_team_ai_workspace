@@ -162,6 +162,10 @@ class Manager(Node):
             code = res.error_code if res else 'E_NO_SERVER'
             self.log(run_id, task, gap_id, tries, f'{task.lower()}_result', code,
                      res.message if res else 'action server not found')
+            if task == 'PUTTY':
+                # 현장 퍼티는 특이점/힘 형성 문제를 검증 중이다.
+                # 팀의 기본 재시도·HOME 정책으로 자동 관절 이동을 추가하지 않는다.
+                return 'HOLD', res
             retry, action = POLICY.get(code, (0, 'HOLD'))
             if tries >= retry:
                 return action, res
@@ -178,6 +182,8 @@ class Manager(Node):
         if not self.goal_handle.accepted:
             self.goal_handle = None
             return None
+        if self.abort:
+            self.goal_handle.cancel_goal_async()  # Goal 수락 대기 중 들어온 STOP도 반영
         res = wait(self.goal_handle.get_result_async()).result
         self.goal_handle = None
         return res

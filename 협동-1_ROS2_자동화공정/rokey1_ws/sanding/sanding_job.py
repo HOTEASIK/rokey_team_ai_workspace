@@ -45,6 +45,8 @@ DR_init.__dsr__model = ROBOT_MODEL
 
 # ── 도구 들기 ─────────────────────────────────────────────────────
 HOME_POSJ = [0.0, 0.0, 90.0, 0.0, 90.0, 0.0]   # 현재 팔 형태로 도구에 못 가면 여기로 먼저 이동
+TOOL_NAME = "Tool Weight"      # 티칭 펜던트에 등록된 Tool (있으면 선택, 없으면 건너뜀)
+TCP_NAMES = ("GripperDA_v1", "GripperDA v1")   # 티칭 펜던트에 등록된 TCP 이름 후보 (도구/작업 위치는 이 TCP 기준으로 교시)
 APPROACH_Z = 100.0             # 도구 위 접근 높이
 LIFT_Z = 100.0                 # 도구 들어올리기 (천천히)
 LIFT_EXTRA_Z = 100.0           # 한 번 더 올리기 (바닥 끌림 방지)
@@ -63,21 +65,34 @@ RETREAT_MM = 60.0
 # ── 순응제어 / 힘제어 ──────────────────────────────────────────────
 # 강성 [x, y, z (N/m, 0~20000), rx, ry, rz (Nm/rad, 0~400)] - 툴 좌표계
 COMPLIANCE_STX = [3000, 3000, 200, 400, 400, 400]  # 툴 Z(누르는 방향)만 부드럽게, 회전은 최대
-PRESS_FORCE_N = 13.0
+                                                   # (회전 강성을 15 까지 낮춰도 실제 기울기 0.1도 → 수동 순응으론 안 맞음.
+                                                   #  대신 아래 '자세 맞추기'로 모멘트를 보고 직접 기울임)
+PRESS_FORCE_N = 13.0           # 기본값 (HMI [샌딩 작업 실행] 의 '누르는 힘' 으로 작업마다 바꿀 수 있음)
+PRESS_FORCE_MIN_N, PRESS_FORCE_MAX_N = 3.0, 30.0
 FORCE_SETTLE_SEC = 0.7
-FORCE_LIMIT_N = 40.0
+FORCE_LIMIT_N = 80.0           # 누르는 힘 + 사포 마찰 포함 전체 외력 (사포가 걸리면 40 N 은 쉽게 넘음)
 MAX_DEPTH_MM = 10.0
-PERP_TOL_DEG = 1.0
+CONTACT_EVEN_MM = 10.0
+# 자세 맞추기: 벽에 누른 채 멈춰서 모멘트로 압력 중심을 재고, 덜 닿는 쪽이 벽으로 가게 조금씩 기울임
+ALIGN_MAX_ITERS = 8
+ALIGN_DONE_MM = 8.0            # 압력 중심이 원판 중앙에서 이 안이면 완료
+ALIGN_GAIN_DEG_PER_MM = 0.04   # 치우침 1mm 당 기울이는 각도 (30mm 치우침 → 1.2도)
+ALIGN_STEP_MAX_DEG = 1.5       # 한 번에 최대
+ALIGN_MAX_DEG = 5.0            # 처음 자세에서 최대 (PERP_TOL_DEG 보다 작게)
+ALIGN_SETTLE_SEC = 0.6
+ALIGN_BACKOFF_MM = 3.0         # 기울이기 전에 벽에서 떨어지는 거리 (닿은 채로 돌리면 가장자리가 긁힘)
+ALIGN_SAMPLES = 25         # 모멘트 로그: 압력 중심이 원판 중앙에서 이 안이면 '고르게 닿음'
+PERP_TOL_DEG = 6.0             # 샌딩 중 허용 기울기 (회전 순응으로 벽면을 따라 기우는 만큼 허용)
 
 # ── 샌딩 패턴 ─────────────────────────────────────────────────────
 SCRUB_STROKE_MM = 25.0         # 시작/종료 위치 왕복 폭 (전체 2.5cm)
 SCRUB_PASSES = 5
-SCRUB_VELX, SCRUB_ACCX = 100, 200
+SCRUB_VELX, SCRUB_ACCX = 60, 120
 ORBIT_RADIUS_MM = 10.0
 ORBIT_TURNS = 3
 ORBIT_POINTS_PER_TURN = 12
 ORBIT_STEP_MM = 30.0           # 원 샌딩 간격 최대값 (시작→종료를 이 값 이하로 균등하게 나눔)
-ORBIT_VELX, ORBIT_ACCX = 80, 150
+ORBIT_VELX, ORBIT_ACCX = 50, 100
 
 # ── 벽 방향 자동 판단 (surface_normal 을 안 줬을 때) ──────────────────
 SNAP_AXIS_DEG = 20.0           # 시작 자세 툴 Z 가 베이스 축과 이 각도 안이면 그 축에 정확히 90도로 맞춤
@@ -96,6 +111,7 @@ POLL_DT = 0.02
 MOTION_START_TIMEOUT = 0.5
 MOTION_TIMEOUT = 60.0
 ARRIVE_TOL_MM, ARRIVE_TOL_DEG = 3.0, 2.0
+SANDING_TOL_MM = 8.0           # 샌딩 중(힘제어) 도착 허용 오차 - 사포 마찰로 경로보다 몇 mm 뒤처지는 건 정상
 WORK_TOL_DEG = 0.5
 PATH_STEP_MM = 20.0
 
@@ -135,6 +151,7 @@ class SandingJob:
         self.floor_z = floor_z   # 작업하는 벽 아래 바닥 높이 (베이스 z, mm). None 이면 바닥 여유 검사 안 함
         self.floor_clear = floor_clear   # 도구 아래끝과 바닥 사이 여유 (mm)
         self.tool_radius = tool_radius   # 원형 도구 반지름 (mm)
+        self.press_force = PRESS_FORCE_N   # 샌딩 중 벽 쪽 누르는 힘 (N) - 작업마다 서버가 HMI 값으로 바꿈
         import DSR_ROBOT2 as dr
         from DR_common2 import posj, posx
         self.dr, self.posx, self.posj = dr, posx, posj
@@ -194,7 +211,7 @@ class SandingJob:
             raise RuntimeError("fkin 실패")
         return p
 
-    def verify(self, target, what, skip_axis=None, tol_deg=ARRIVE_TOL_DEG):
+    def verify(self, target, what, skip_axis=None, tol_deg=ARRIVE_TOL_DEG, tol_mm=ARRIVE_TOL_MM):
         cur = self.current()
         err = sm.sub(cur[:3], target[:3])
         if skip_axis is not None:
@@ -202,7 +219,7 @@ class SandingJob:
         rc, rt = sm.zyz_to_matrix(cur[3:]), sm.zyz_to_matrix(target[3:])
         c = (sum(rc[i][j] * rt[i][j] for i in range(3) for j in range(3)) - 1.0) / 2.0
         ang = math.degrees(math.acos(max(-1.0, min(1.0, c))))
-        if sm.norm(err) > ARRIVE_TOL_MM or ang > tol_deg:
+        if sm.norm(err) > tol_mm or ang > tol_deg:
             raise MotionFailed(f"{what}: 목표 미도착 (오차 {sm.norm(err):.1f}mm / {ang:.1f}도), "
                                f"목표 {fmt(target)}, 현재 {fmt(cur)}, 알람: {self.alarm()}")
 
@@ -240,14 +257,118 @@ class SandingJob:
         f = vec6(self.dr.get_tool_force(ref=self.dr.DR_TOOL))
         if f is None:
             raise RuntimeError("get_tool_force 실패")
+        self.last_ft = f   # 툴 좌표계 [Fx, Fy, Fz, Mx, My, Mz] (모멘트 로그용)
         return f[:3]
 
     def force_avg(self, n=10):
         acc = [0.0, 0.0, 0.0]
+        macc = [0.0, 0.0, 0.0]
         for _ in range(n):
             acc = sm.add(acc, self.force())
+            macc = sm.add(macc, self.last_ft[3:6])
             time.sleep(POLL_DT)
+        self.moment_baseline = sm.scale(macc, 1.0 / n)   # 접촉 전 모멘트 (도구 무게 등) → 샌딩 중 빼고 봄
         return sm.scale(acc, 1.0 / n)
+
+    def contact_sample(self, baseline, tilt):
+        """샌딩 중 한 순간의 접촉 상태: (Fz, Mx, My, tilt) - 접촉 전 기준값을 뺀 값"""
+        ft = self.last_ft
+        mb = getattr(self, "moment_baseline", [0.0, 0.0, 0.0])
+        return (ft[2] - baseline[2], ft[3] - mb[0], ft[4] - mb[1], tilt)
+
+    def log_contact(self, what, samples, orient):
+        """이동 하나 동안의 모멘트 요약 + 압력 중심 (원판 전체가 고르게 눌리면 압력 중심 ≈ 원판 중앙)
+        누르는 힘 Fz 가 점 (x, y) 에 작용하면 Mx = y·Fz, My = -x·Fz → x = -My/Fz, y = Mx/Fz (툴 좌표계)"""
+        if not samples:
+            return
+        n = len(samples)
+        fz = sum(s[0] for s in samples) / n
+        mx = sum(s[1] for s in samples) / n
+        my = sum(s[2] for s in samples) / n
+        mx_pk = max(abs(s[1]) for s in samples)
+        my_pk = max(abs(s[2]) for s in samples)
+        tilt_pk = max(s[3] for s in samples)
+        msg = (f"   [모멘트] {what}: Mx 평균 {mx:+.2f} (최대 {mx_pk:.2f}) / My 평균 {my:+.2f} (최대 {my_pk:.2f}) Nm, "
+               f"Fz 평균 {fz:+.1f} N, 기울기 최대 {tilt_pk:.1f}도")
+        if abs(fz) >= 2.0:
+            x_mm, y_mm = -my / fz * 1000.0, mx / fz * 1000.0
+            tx, ty, _ = sm.tool_axes(orient)
+            cop = sm.add(sm.scale(tx, x_mm), sm.scale(ty, y_mm))   # 베이스 좌표계 방향으로 바꾼 압력 중심 치우침
+            off = math.hypot(x_mm, y_mm)
+            if off > self.tool_radius:
+                state = "원판 밖 - 이동 중 사포 마찰 비틀림이 커서 접촉 판단 불가"
+            else:
+                state = "고르게 닿음" if off < CONTACT_EVEN_MM else ("한쪽 치우침" if off < self.tool_radius * 0.6 else "한쪽만 닿음 의심")
+            msg += (f", 압력중심 치우침 {off:.0f}mm → 베이스 X {cop[0]:+.0f} Y {cop[1]:+.0f} Z {cop[2]:+.0f}mm ({state})")
+        else:
+            msg += ", 누르는 힘이 작아 압력중심 계산 안 함"
+        self.log.info(msg)
+
+    def pressure_center(self, baseline):
+        """멈춘 상태에서 평균 낸 (Fz, x, y): 압력 중심 (툴 좌표계 mm). Fz 가 작으면 x, y = None"""
+        mb = getattr(self, "moment_baseline", [0.0, 0.0, 0.0])
+        fz = mx = my = 0.0
+        for _ in range(ALIGN_SAMPLES):
+            self.force()
+            ft = self.last_ft
+            fz += ft[2] - baseline[2]
+            mx += ft[3] - mb[0]
+            my += ft[4] - mb[1]
+            time.sleep(POLL_DT)
+        fz, mx, my = fz / ALIGN_SAMPLES, mx / ALIGN_SAMPLES, my / ALIGN_SAMPLES
+        if abs(fz) < 2.0:
+            return fz, None, None
+        return fz, -my / fz * 1000.0, mx / fz * 1000.0
+
+    def align_to_wall(self, orient, baseline, tz, search_end):
+        """힘제어 켜기 전, 벽에 닿은 채 멈춘 상태에서 모멘트로 압력 중심을 재고 원판 전체가 닿게 자세를 맞춤.
+        (힘제어 중에는 툴 힘 값이 거의 0 으로 나와 못 씀 → 위치 제어로 닿은 상태에서 잼)
+        한 번: 압력 중심 측정 → 벽에서 ALIGN_BACKOFF_MM 뒤로 → 기울이기 → 다시 접촉 탐색.
+        압력 중심 r=(x, y) 쪽이 더 세게 닿음 → 툴축 (-y, x) 둘레로 돌리면 r 쪽이 벽에서 멀어지고 반대쪽이 다가감.
+        센서 부호가 반대일 수 있으므로 치우침이 오히려 커지면 방향을 뒤집음. 맞춘 자세를 돌려줌."""
+        dr = self.dr
+        start = list(orient)
+
+        def tilt_from_start(o):
+            return math.degrees(math.acos(max(-1.0, min(1.0, sm.dot(sm.tool_axes(o)[2], sm.tool_axes(start)[2])))))
+
+        sign, prev = 1.0, None
+        for it in range(1, ALIGN_MAX_ITERS + 1):
+            time.sleep(ALIGN_SETTLE_SEC)
+            fz, x, y = self.pressure_center(baseline)
+            if x is None:
+                self.log.warn(f"   자세 맞추기: 누르는 힘이 작음 (Fz {fz:+.1f} N) - 지금 자세로 진행")
+                break
+            off = math.hypot(x, y)
+            tx, ty, _ = sm.tool_axes(orient)
+            cop = sm.add(sm.scale(tx, x), sm.scale(ty, y))
+            self.log.info(f"   자세 맞추기 {it}: 압력중심 치우침 {off:.0f}mm (베이스 Y {cop[1]:+.0f} Z {cop[2]:+.0f}), "
+                          f"Fz {fz:+.1f} N, 처음 자세 대비 {tilt_from_start(orient):.1f}도")
+            if off < ALIGN_DONE_MM:
+                self.log.info("   자세 맞추기 완료: 원판 전체가 고르게 닿음")
+                break
+            if prev is not None and off > prev + 2.0:
+                sign = -sign
+                self.log.warn("   치우침이 커짐 → 기울이는 방향을 반대로")
+            ang = sign * min(ALIGN_STEP_MAX_DEG, ALIGN_GAIN_DEG_PER_MM * off)
+            new = sm.rotate_about_axis(orient, sm.add(sm.scale(tx, -y), sm.scale(ty, x)), ang)
+            if tilt_from_start(new) > ALIGN_MAX_DEG:
+                self.log.warn(f"   자세 맞추기: 처음 자세에서 {ALIGN_MAX_DEG}도 넘게 기울어야 함 - 여기서 멈춤 "
+                              "(벽이 많이 틀어졌거나 도구가 그리퍼에서 돌아갔을 수 있음)")
+                break
+            here = self.current()[:3]
+            back = sm.sub(here, sm.scale(tz, ALIGN_BACKOFF_MM))
+            self.movel(back + list(orient), SLOW_VELX, SLOW_ACCX, f"자세 맞추기 {it}: 벽에서 {ALIGN_BACKOFF_MM:.0f}mm 뒤로")
+            self.movel(back + list(new), SLOW_VELX, SLOW_ACCX, f"자세 맞추기 {it}: {ang:+.1f}도 기울이기")
+            orient, prev = new, off
+            hit = self.guarded(lambda o=list(new): dr.amovel(self.posx(list(search_end) + o), vel=SEARCH_VELX,
+                                                            acc=SEARCH_ACCX, ref=dr.DR_BASE),
+                               baseline, stop_force=CONTACT_DETECT_N, what=f"자세 맞추기 {it}: 다시 접촉")
+            if not hit:
+                raise Abort("자세 맞추기 중 다시 벽에 닿지 않았습니다.")
+        else:
+            self.log.warn(f"   자세 맞추기: {ALIGN_MAX_ITERS}번 해도 {ALIGN_DONE_MM}mm 안으로 안 들어옴 - 지금 자세로 진행")
+        return orient
 
     # ── 감시하며 이동 ─────────────────────────────────────────────
     def guarded(self, start_motion, baseline, target=None, what="이동",
@@ -255,6 +376,17 @@ class SandingJob:
         self.check_ret(start_motion(), what)
         t0 = time.time()
         started = False
+        samples = []
+        try:
+            return self._guarded_loop(t0, started, samples, baseline, target, what, stop_force, limit_force, plane)
+        finally:
+            if plane is not None:
+                try:   # 로그 실패가 원래 오류(중단 사유)를 가리지 않게
+                    self.log_contact(what, samples, self.current()[3:])
+                except Exception as ex:
+                    self.log.warn(f"   [모멘트] 로그 실패: {ex}")
+
+    def _guarded_loop(self, t0, started, samples, baseline, target, what, stop_force, limit_force, plane):
         while True:
             if self.dr.check_motion() == self.dr.DR_STATE_IDLE:
                 if started or time.time() - t0 > MOTION_START_TIMEOUT:
@@ -264,7 +396,9 @@ class SandingJob:
                             self.log.info(f"   접촉 감지 (이동 종료 시점): {f:.1f} N")
                             return True
                     if target is not None:
-                        self.verify(target, what, skip_axis=None if plane is None else plane[1])
+                        self.verify(target, what, skip_axis=None if plane is None else plane[1],
+                                    tol_deg=ARRIVE_TOL_DEG if plane is None else PERP_TOL_DEG + ARRIVE_TOL_DEG,
+                                    tol_mm=ARRIVE_TOL_MM if plane is None else SANDING_TOL_MM)
                     return False
             else:
                 started = True
@@ -276,7 +410,9 @@ class SandingJob:
                 return True
             if limit_force is not None and f >= limit_force:
                 self.stop_motion()
-                raise Abort(f"외력 {f:.1f} N > {limit_force} N (충돌 의심)")
+                fv = sm.sub(self.last_ft[:3], baseline)
+                raise Abort(f"외력 {f:.1f} N > {limit_force} N (충돌 의심) - 툴 기준 누르는 방향 Fz {fv[2]:+.1f} N, "
+                            f"옆 방향 {math.hypot(fv[0], fv[1]):.1f} N")
             if plane is not None:
                 cur = self.current()
                 depth = sm.dot(sm.sub(cur[:3], plane[0]), plane[1])
@@ -284,6 +420,7 @@ class SandingJob:
                     self.stop_motion()
                     raise Abort(f"벽보다 {depth:.1f} mm 더 들어감 (표면 이탈 의심)")
                 tilt = math.degrees(math.acos(max(-1.0, min(1.0, sm.dot(sm.tool_axes(cur[3:])[2], plane[1])))))
+                samples.append(self.contact_sample(baseline, tilt))
                 if tilt > PERP_TOL_DEG:
                     self.stop_motion()
                     raise Abort(f"도구가 벽 수직에서 {tilt:.1f}도 기울어짐 (> {PERP_TOL_DEG}도)")
@@ -304,12 +441,66 @@ class SandingJob:
                 raise RuntimeError("task_compliance_ctrl 실패")
             self.force_active = True
             time.sleep(0.3)
-            if dr.set_desired_force(fd=[0, 0, PRESS_FORCE_N, 0, 0, 0], dir=[0, 0, 1, 0, 0, 0],
+            if dr.set_desired_force(fd=[0, 0, float(self.press_force), 0, 0, 0], dir=[0, 0, 1, 0, 0, 0],
                                     mod=dr.DR_FC_MOD_REL) not in (None, 0):
                 raise RuntimeError("set_desired_force 실패")
-        finally:
+        except BaseException:
             dr.set_ref_coord(dr.DR_BASE)
+            raise
+        # 힘제어 중에는 set_ref_coord 가 거부됨 (DSR 1903 경고) → 해제 후 force_off 에서 BASE 로 되돌림.
+        # 이동/위치 읽기는 전부 ref=DR_BASE 를 직접 넘기므로 영향 없음
         time.sleep(FORCE_SETTLE_SEC)
+
+    def ensure_tcp(self):
+        """도구 위치(TOOL_POSX)·작업 위치는 GripperDA_v1 TCP 기준으로 교시한 값 → 작업 전에 Tool/TCP 를 선택.
+        (TCP 가 꺼져 있으면 같은 좌표로 보내도 그리퍼 끝이 TCP 길이만큼 더 아래로 가서 도구/거치대에 부딪힘)
+        팀 sun_gear(실제 로봇에서 동작)와 같은 순서: 수동 모드 → set_tool → set_tcp → 자동 모드.
+        (자동 모드에서는 컨트롤러가 Tool/TCP 변경을 거부함 - ret=-1)"""
+        dr = self.dr
+        tool_now, tcp_now = str(dr.get_tool()).strip(), str(dr.get_tcp()).strip()
+        if tool_now == TOOL_NAME and tcp_now in TCP_NAMES:
+            self.log.info(f"   Tool='{tool_now}', TCP='{tcp_now}' 이미 선택됨")
+        else:
+            tries = [f"처음 Tool='{tool_now}' TCP='{tcp_now}'"]
+            tries.append(f"수동모드 ret={dr.set_robot_mode(dr.ROBOT_MODE_MANUAL)}")
+            time.sleep(0.5)
+            try:
+                if tool_now != TOOL_NAME:
+                    tries.append(f"set_tool('{TOOL_NAME}') ret={dr.set_tool(TOOL_NAME)}")
+                if tcp_now not in TCP_NAMES:
+                    for name in TCP_NAMES:
+                        ret = dr.set_tcp(name)
+                        tries.append(f"set_tcp('{name}') ret={ret}")
+                        if ret == 0:
+                            break
+            finally:
+                tries.append(f"자동모드 ret={dr.set_robot_mode(dr.ROBOT_MODE_AUTONOMOUS)}")
+                time.sleep(0.5)
+            tool_now, tcp_now = str(dr.get_tool()).strip(), str(dr.get_tcp()).strip()
+            self.log.info(f"   Tool/TCP 설정: {' / '.join(tries)} → Tool='{tool_now}', TCP='{tcp_now}'")
+            if tool_now != TOOL_NAME:
+                self.log.warn(f"   Tool '{TOOL_NAME}' 선택 안 됨 → Tool 없이 진행 (충돌 감지가 민감할 수 있음)")
+            if tcp_now not in TCP_NAMES:
+                raise PlanError(f"TCP 를 '{TCP_NAMES[0]}' 으로 바꾸지 못했습니다 (현재 '{tcp_now}'). 로봇은 움직이지 않았습니다. "
+                                "로봇 상태가 STANDBY 인지 확인하세요")
+        self.log.info(f"   현재 위치 {fmt(self.current())}, 현재 관절 {fmt(self.current_q())}")
+
+    def reset_control_mode(self):
+        """작업 시작 전 컨트롤러에 남아 있을 수 있는 힘제어/순응제어를 해제하고 좌표계를 BASE 로.
+        (이전 작업이 SAFE_STOP·서버 종료 등으로 끝나면 순응제어가 켜진 채 남을 수 있음 →
+         그 상태로 도구 쪽으로 가면 툴 Z(아래) 강성이 200 N/m 라 팔이 아래로 처져 내리꽂힘)"""
+        dr = self.dr
+        for name, fn in (("release_force", dr.release_force), ("release_compliance_ctrl", dr.release_compliance_ctrl)):
+            try:
+                fn()
+            except Exception as ex:
+                self.log.warn(f"   {name} 실패(무시): {ex}")
+        try:
+            dr.set_ref_coord(dr.DR_BASE)
+        except Exception as ex:
+            self.log.warn(f"   set_ref_coord(BASE) 실패(무시): {ex}")
+        self.force_active = False
+        time.sleep(0.3)
 
     def force_off(self):
         if not self.force_active:
@@ -514,6 +705,10 @@ class SandingJob:
         """start_posx/end_posx 로 작업. start_posj + work_vector 를 주면 그걸로 (start/end_posx 무시)"""
         dr = self.dr
         self.step("계획: 벽 방향 + 경로 관절 검사 + 처짐 검사 (로봇 안 움직임)", phase=1)
+        # 계획(ikin/fkin)은 컨트롤러의 '현재 TCP' 기준으로 계산됨 → TCP 를 먼저 맞춘 뒤 계획해야 함
+        # (TCP 없이 계획하고 나중에 TCP 를 켜면 관절 목표가 TCP 길이(204mm)만큼 어긋남)
+        self.reset_control_mode()   # 남아 있는 순응/힘제어 해제 (안 하면 첫 이동에서 팔이 처질 수 있음)
+        self.ensure_tcp()
         geo = self.plan(tool, start_posx, end_posx, normal, start_posj, work_vector)
         orient, tz, u, v, half, sn = geo["orient"], geo["tz"], geo["u"], geo["v"], geo["half"], geo["sn"]
         sd = geo["sd"]
@@ -565,11 +760,13 @@ class SandingJob:
                                stop_force=CONTACT_DETECT_N, what="접촉 탐색")
             if not hit:
                 raise Abort(f"시작 위치보다 {SEARCH_BEYOND_MM:.0f}mm 더 들어가도 벽에 닿지 않았습니다.")
+            self.step("자세 맞추기: 원판 전체가 벽에 닿게 (모멘트로 덜 닿는 쪽 판단)")
+            orient = self.align_to_wall(orient, baseline, tz, geo["search_end"])   # 이후 샌딩 동작은 맞춘 자세로
             contact = self.current()[:3]
             self.log.info(f"   벽 접촉 위치: {fmt(contact)} (시작 위치 대비 툴Z {sm.dot(sm.sub(contact, geo['s']), tz):+.1f}mm)")
 
             # 5. 순응 + 힘제어 샌딩
-            self.step(f"순응제어 + 힘제어 ON (벽 쪽 {PRESS_FORCE_N} N)", phase=5)
+            self.step(f"순응제어 + 힘제어 ON (벽 쪽 {self.press_force:.1f} N)", phase=5)
             self.force_on()
             shift = sm.sub(contact, geo["s"])
             centers = [sm.add(c, shift) for c in geo["centers"]]

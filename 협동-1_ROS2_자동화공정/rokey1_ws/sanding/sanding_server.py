@@ -37,7 +37,7 @@ from rclpy.executors import MultiThreadedExecutor
 
 from rokey_interfaces.action import ToolTask
 
-from sanding.sanding_job import (FLOOR_CLEAR_MM, ROBOT_ID, TOOL_RADIUS_MM, Abort, Canceled, PlanError,
+from sanding.sanding_job import (FLOOR_CLEAR_MM, PRESS_FORCE_MAX_N, PRESS_FORCE_MIN_N, PRESS_FORCE_N, ROBOT_ID, TOOL_RADIUS_MM, Abort, Canceled, PlanError,
                                   SandingJob)
 
 ACTION_NAME = "tool_task"   # HMI 가 /dsr01/tool_task 로 보냄
@@ -84,6 +84,8 @@ class SandingServer:
         floor_z = float(self.node.declare_parameter("floor_z", FLOOR_Z_MM).value)
         floor_clear = float(self.node.declare_parameter("floor_clear", FLOOR_CLEAR_MM).value)
         tool_radius = float(self.node.declare_parameter("tool_radius", TOOL_RADIUS_MM).value)
+        # 샌딩 누르는 힘 (N): HMI 가 goal 보내기 직전에 이 파라미터를 바꿈 → 작업 시작 때 읽음
+        self.node.declare_parameter("press_force", PRESS_FORCE_N)
 
         self._gh = None
         self.job = SandingJob(self.dsr_node, self.log,
@@ -137,6 +139,11 @@ class SandingServer:
         g = goal_handle.request
         result = ToolTask.Result()
         try:
+            force = float(self.node.get_parameter("press_force").value)
+            if not PRESS_FORCE_MIN_N <= force <= PRESS_FORCE_MAX_N:
+                raise PlanError(f"누르는 힘 {force} N 은 {PRESS_FORCE_MIN_N}~{PRESS_FORCE_MAX_N} N 이어야 합니다")
+            self.job.press_force = force
+            self.log.info(f"샌딩 누르는 힘: {force:.1f} N")
             if is_default(g):
                 self.job.run(TOOL_POSX[g.tool_id], None, None, goal_normal(g), g.return_tool,
                              start_posj=DEFAULT_START_POSJ, work_vector=DEFAULT_WORK_VECTOR)

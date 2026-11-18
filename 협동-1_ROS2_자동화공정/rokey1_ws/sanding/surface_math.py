@@ -100,6 +100,12 @@ def _matmul(a, b):
     return [[sum(a[i][k] * b[k][j] for k in range(3)) for j in range(3)] for i in range(3)]
 
 
+def rotate_about_axis(euler_deg, axis_base, ang_deg):
+    """자세(ZYZ)를 베이스 기준 축 axis_base 로 ang_deg 만큼 돌린 자세 (TCP 위치는 그대로 두고 쓰는 용도)"""
+    r = _matmul(_axis_angle_matrix(axis_base, math.radians(ang_deg)), zyz_to_matrix(euler_deg))
+    return matrix_to_zyz(r)
+
+
 def orient_toward_surface(euler_deg, surface_normal):
     """툴 Z 가 표면 쪽(-surface_normal)을 향하도록 자세를 최소 회전으로 바꿈.
 

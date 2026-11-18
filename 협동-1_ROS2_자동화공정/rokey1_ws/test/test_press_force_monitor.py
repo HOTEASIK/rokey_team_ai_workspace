@@ -106,12 +106,12 @@ def test_no_extra_approach_option_and_default_guard_configuration():
     validate_search(args)
     assert args.press_force == 6
     assert args.force_tolerance == 1
-    assert args.force_wait_timeout == 5
+    assert args.force_wait_timeout == 30
     assert not hasattr(args, 'extra_approach')
 
 
 @pytest.mark.parametrize('name,value', [('force_tolerance', 6), ('force_wait_timeout', 0),
-                                      ('force_stable_time', 5), ('force_loss_timeout', -1)])
+                                      ('force_stable_time', 30), ('force_loss_timeout', -1)])
 def test_bad_guard_settings_reject_before_robot_execution(name, value):
     args = make_plane_parser().parse_args(['--execute-motion', '--contact-search',
                                            '--floor-force', '2.3', '--wall-force', '2.3'])
@@ -159,17 +159,19 @@ def test_force_gate_failure_never_sends_spline_and_stops_before_release(monkeypa
                           spin_until_future_complete=lambda *a, **kw: None)
     monkeypatch.setitem(sys.modules, 'rclpy', ros)
     monkeypatch.setattr(utils.shutdown, 'safe_shutdown', lambda n: None)
+    monkeypatch.setattr(motion, 'start_singularity_watch', lambda rid: SimpleNamespace(
+        wait_ready=lambda: None, check=lambda: None, close=lambda: None))
     def fail_gate(*a, **kw):
         raise TimeoutError('force not reached')
     monkeypatch.setattr(motion, 'wait_for_press_force', fail_gate)
     args = make_plane_parser().parse_args(['--execute-motion', '--contact-search',
-                                           '--floor-force', '2.3', '--wall-force', '2.3'])
+                                           '--floor-force', '2.3', '--wall-force', '2.3', '--press-force', '10'])
     def builder(current, args):
         yield '면에 수직 접근', tuple(actual), 10
         yield '평면 각도 변화 도포', (100, 0, 280, 0, 90, 0), 10
     with pytest.raises(TimeoutError, match='force not reached'):
         motion.run_robot(args, builder, allow_real=True, continuous=True,
-                         contact_probe=lambda io: tuple(actual), press_force=6)
+                         contact_probe=lambda io: tuple(actual), press_force=10)
     assert 'set_desired_force' in events
     assert 'move_spline_task' not in events
     assert events.index('move_stop') < events.index('release_force')
