@@ -11,9 +11,8 @@
 PKG = 'rokey1'
 MODES = ('virtual', 'real')
 
-# 팀 샌딩 서버: 빈 시작/끝은 서버에 등록된 기본 작업을 사용한다.
-DEFAULT_START = ''
-DEFAULT_END = ''
+DEFAULT_START = '364.96,-184.31,92.91,61.79,-177.53,61.44'
+DEFAULT_END = '464.96,-184.31,92.91,61.79,-177.53,61.44'
 
 
 def _run(exe, *args):
@@ -42,10 +41,12 @@ def _p(key, label, type_, default, options=None, help_='', scale=False):
 
 # ----------------------------------------------------------------------------- navigation
 def _wall_size(mode, p):
+    # 화면에 없는 값(사고 주입, 높이 측정 위치 등)은 노드 기본값을 쓴다 (RViz 마커는 항상 켬)
     return [_run('wall_size', *_ros_params(
-        mode=mode, scan=p['scan'], face=p['face'], center=p['center'],
+        mode=mode, scan=p['scan'], dir=p['dir'], start_dist=p['start_dist'], max_dist=p['max_dist'],
+        fast_until=p['fast_until'], floor_guess=p['floor_guess'], center=p['center'],
         lat_min=p['lat_min'], lat_max=p['lat_max'], z_limit=p['z_limit'],
-        zs=p['zs'], xs=p['xs'], step=p['step'], inject=p['inject'], rviz=p['rviz']))]
+        zs=p['zs'], step=p['step']))]
 
 
 def _wall_navigation(mode, p):
@@ -68,28 +69,13 @@ def _wall_modeling(mode, p):
 
 # ----------------------------------------------------------------------------- putty_demo
 def _initialize_args(mode, p):
-    return _ros_params(execute_motion=True, virtual_gripper=(mode == 'virtual'))
+    return _ros_params(execute_motion=True, virtual_gripper=mode != 'real')
 
 
 def _pickup_args(mode, p):
-    args = ['--execute-motion',
+    return ['--execute-motion', *(['--virtual-gripper'] if mode != 'real' else []),
             '--clearance', str(p['clearance']), '--settle', str(p['settle']),
             '--transfer-speed', str(p['transfer_speed']), '--pick-speed', str(p['pick_speed'])]
-    if mode == 'virtual':
-        args.append('--virtual-gripper')
-    return args
-
-
-def putty_arguments(task, params):
-    """HMI 입력을 PuttyTask Goal의 기존 작업 설정 토큰으로 변환한다."""
-    names = {
-        'initialize': (),
-        'pickup': ('clearance', 'settle', 'transfer_speed', 'pick_speed'),
-        'scoop': ('scoop_speed',),
-        'apply': ('floor_force', 'wall_force', 'press_force', 'apply_speed'),
-        'return': ('place_speed',),
-    }[task]
-    return [token for name in names for token in ('--'+name.replace('_', '-'), str(params[name]))]
 
 
 PICKUP_PARAMS = [
@@ -114,8 +100,30 @@ def _homeset(mode, p):
         mode=mode, home=p['home'], vel=p['vel'], acc=p['acc']))]
 
 
+# ----------------------------------------------------------------------------- 공정(DB)
+DB_PARAMS = [
+    _p('purpose', '목적', 'select', 'TEST', ['TEST', 'EXPERIMENT', 'DEMO']),
+    _p('material', '재료', 'select', 'clay', ['clay', 'putty']),
+    _p('note', '메모', 'text', ''),
+]
+GAP_PARAM = _p('gap_id', '틈 번호 (gap_id)', 'number', 1,
+               help_='DB gap 테이블의 번호. 탐색(EXPLORE/전체 공정) 로그에 찍힌 gap_id 를 넣는다')
+
+
+def _db_task(process, label, desc, params):
+    return {'id': f'process_{process.lower()}', 'group': 'process', 'kind': 'db', 'process': process,
+            'label': label, 'desc': desc, 'params': params, 'build': None, 'motion': lambda mode: True}
+
+
 # ----------------------------------------------------------------------------- 카탈로그
 TASKS = [
+    # ===== 공정 (DB 기록) =====
+    _db_task('ALL', '전체 공정', '탐색 → 찾은 틈마다 퍼티 → 샌딩. 결과는 DB(run/wall/gap/task_log)에 저장.',
+             DB_PARAMS),
+    _db_task('EXPLORE', '탐색', '/process/explore 만 실행. 찾은 벽/틈을 DB에 저장.', DB_PARAMS),
+    _db_task('PUTTY', '퍼티', '지정한 gap_id 한 틈에 /process/putty 실행.', [GAP_PARAM] + DB_PARAMS),
+    _db_task('SANDING', '샌딩', '지정한 gap_id 한 틈에 /process/sanding 실행.', [GAP_PARAM] + DB_PARAMS),
+
     # ===== NAVIGATION =====
     {
         'id': 'wall_size', 'group': 'navigation', 'kind': 'process',
@@ -123,21 +131,26 @@ TASKS = [
         'desc': '로봇 끝(TCP)으로 벽을 살짝 더듬어 벽의 높이·너비를 잰다. 결과는 size_*.json 으로 저장. '
                 '(wall_size)',
         'params': [
-            _p('scan', '스캔 방식', 'select', 'both', ['both', 'width', 'height', 'line_v', 'line_h', 'lines'],
-               help_='both=너비+높이 / width=너비만 / height=높이만 / line_v·line_h=한 줄 / lines=여러 줄'),
-            _p('face', '벽 표면 추정 (mm)', 'number', 500.0,
-               help_='로봇 베이스에서 벽까지 대략 거리(X). 이 근처부터 천천히 접근'),
-            _p('center', '옆 중심 (mm)', 'number', 0.0, help_='벽 가운데의 Y 좌표'),
-            _p('lat_min', '옆 최소 (mm)', 'number', -320.0, help_='너비 스윕을 시작하는 Y 최소값'),
-            _p('lat_max', '옆 최대 (mm)', 'number', 320.0, help_='너비 스윕을 끝내는 Y 최대값'),
-            _p('z_limit', '높이 한계 (mm)', 'number', 450.0, help_='이 높이(Z) 이상은 올라가지 않음'),
-            _p('zs', '너비 측정 높이들', 'text', '50,150,250', help_='너비를 잴 Z 높이 목록 (쉼표로 구분)'),
-            _p('xs', '높이 측정 위치들', 'text', '', help_='높이를 잴 위치 목록. 비우면 자동'),
-            _p('step', '스윕 간격 (mm)', 'number', 10.0, help_='한 번에 옮기는 거리. 작을수록 정밀·느림'),
-            _p('inject', '사고 주입 시험 (가상)', 'select', 'none',
-               ['none', 'tool_side', 'tool_overload', 'tool_torque', 'arm', 'estop', 'sensor'],
-               help_='가상 모드에서 일부러 사고를 일으켜 안전 처리를 시험. 평소엔 none'),
-            _p('rviz', 'RViz 마커', 'bool', True, help_='측정 과정을 RViz 에 표시'),
+            _p('dir', '탐색 축/방향', 'select', '+x', ['+x', '-x', '+y', '-y'],
+               help_='벽이 있는 방향 (로봇 base 기준). 시작 자세 J1 과 그리퍼가 이 방향을 향함'),
+            _p('start_dist', '출발 거리 (mm)', 'number', 300.0,
+               help_='base 에서 탐색 방향으로 이만큼 떨어진 곳에서 바닥을 찍고 벽 쪽으로 출발. 벽보다 앞이어야 함'),
+            _p('max_dist', '최대 탐색 거리 (mm)', 'number', 800.0,
+               help_='base 에서 이 거리까지 가도 벽이 없으면 중단. 작업 반경(약 900) 안으로'),
+            _p('fast_until', '빠른 전진 거리 (mm)', 'number', 0.0,
+               help_='base 에서 이 거리까지는 30mm/s 로 빠르게 (벽이 확실히 없는 구간). 0 = 처음부터 천천히'),
+            _p('floor_guess', '바닥 높이 추정 (mm)', 'number', 50.0,
+               help_='대략적인 바닥 Z. 이 +60mm 부터 천천히 내려가고 -100mm 까지 못 찾으면 중단'),
+            _p('scan', '측정 방식', 'select', 'both', ['both', 'width', 'height', 'lines'],
+               help_='both=너비+높이 스윕 / width=너비만 / height=높이만 / lines=빠른 측정(몇 줄만)'),
+            _p('center', '옆 중심 (mm)', 'number', 0.0,
+               help_='벽 가운데의 옆 좌표 (±x 방향이면 Y, ±y 방향이면 X)'),
+            _p('lat_min', '옆 최소 (mm)', 'number', -320.0, help_='옆 방향 탐색 최소 좌표 (벽보다 넓게)'),
+            _p('lat_max', '옆 최대 (mm)', 'number', 320.0, help_='옆 방향 탐색 최대 좌표 (벽보다 넓게)'),
+            _p('z_limit', '높이 한계 (mm)', 'number', 450.0, help_='이 높이(Z) 이상은 올라가지 않음 (벽보다 높게)'),
+            _p('step', '스윕 간격 (mm)', 'number', 10.0, help_='both/width/height: 한 번에 옮기는 거리. 작을수록 정밀·느림'),
+            _p('zs', '빠른 측정 높이들', 'text', '50,150,250',
+               help_='lines 일 때만: 너비를 잴 바닥 기준 높이 목록 (쉼표로 구분). 높이 측정 위치는 자동'),
         ],
         'build': _wall_size, 'motion': lambda mode: True,
     },
@@ -198,102 +211,62 @@ TASKS = [
 
     # ===== PUTTY =====
     {
+        'id': 'putty_cycle', 'group': 'putty', 'kind': 'process',
+        'label': '퍼티 전체 순서',
+        'desc': '[초기화 → 헤라 집기] 를 순서대로 실행. 앞 단계가 실패하면 뒤 단계는 실행하지 않음. '
+                '가상 모드는 로봇 없이 순서만 점검(dry-run).',
+        'params': PICKUP_PARAMS,
+        'build': lambda mode, p: [_run('initialize_device', *_initialize_args(mode, p)),
+                                  _run('pickup_spatula', *_pickup_args(mode, p))],
+        'motion': lambda mode: True,
+    },
+    {
+        'id': 'initialize_device', 'group': 'putty', 'kind': 'process',
+        'label': '초기화',
+        'desc': '홈 자세로 돌아간 뒤 빈 RG2 그리퍼를 닫는다. 가상 모드는 에뮬레이터 + 가상 그리퍼.',
+        'params': [],
+        'build': lambda mode, p: [_run('initialize_device', *_initialize_args(mode, p))],
+        'motion': lambda mode: True,
+    },
+    {
+        'id': 'pickup_spatula', 'group': 'putty', 'kind': 'process',
+        'label': '헤라 집기',
+        'desc': '7번 위치의 헤라 위로 이동 → 내려가서 RG2 로 집기 → 들어 올리기.',
+        'params': PICKUP_PARAMS,
+        'build': lambda mode, p: [_run('pickup_spatula', *_pickup_args(mode, p))],
+        'motion': lambda mode: True,
+    },
+
+    {
         'id': 'putty_task_server', 'group': 'putty', 'kind': 'service',
         'label': '퍼티 액션 서버',
-        'desc': '/dsr01/putty_task 서버 시작. 작업 Goal 전에는 움직이지 않습니다. 먼저 시작하세요.',
-        'params': [], 'build': lambda mode, p: [_run('putty_task_server')],
-        'motion': lambda mode: False,
-    },
-    {
-        'id': 'putty_cycle', 'group': 'putty', 'kind': 'action',
-        'putty_tasks': ('initialize', 'pickup'),
-        'label': '퍼티 초기화·집기',
-        'desc': '[초기화 → 헤라 집기] 를 순서대로 실행. 앞 단계가 실패하면 뒤 단계는 실행하지 않음. '
-                '가상 모드에서도 컨트롤러에 이동 요청을 전송합니다.',
-        'params': PICKUP_PARAMS,
-        'build': None,
-        'motion': lambda mode: True,
-    },
-    {
-        'id': 'initialize_device', 'group': 'putty', 'kind': 'action',
-        'putty_tasks': ('initialize',),
-        'label': '초기화',
-        'desc': '홈 자세로 돌아간 뒤 RG2를 닫는다. 가상 모드는 가상 집게 서비스를 사용한다.',
+        'desc': '/process/putty, /process/putty_load, /dsr01/putty_task 액션 서버. '
+                '[공정(DB)] 퍼티 전에 먼저 시작 (virtual 이면 가상 그리퍼).',
         'params': [],
-        'build': None,
-        'motion': lambda mode: True,
-    },
-    {
-        'id': 'pickup_spatula', 'group': 'putty', 'kind': 'action',
-        'putty_tasks': ('pickup',),
-        'label': '헤라 집기',
-        'desc': '현재 보관 위치 [308.42,120.70,152.43] 위로 이동 → 헤라 집기 → 상승.',
-        'params': PICKUP_PARAMS,
-        'build': None,
-        'motion': lambda mode: True,
-    },
-    {
-        'id': 'scoop_putty', 'group': 'putty', 'kind': 'action', 'putty_tasks': ('scoop',),
-        'label': '퍼티 뜨기', 'desc': '측정 경로로 퍼티 뜨기. 실물에서는 파지 확인이 필요합니다.',
-        'params': [_p('tool_held_confirmed', '헤라 파지 확인', 'bool', False),
-                   _p('scoop_speed', '스쿱 속도 (mm/s)', 'number', 3.0, scale=True)],
-        'build': None, 'motion': lambda mode: True,
-    },
-    {
-        'id': 'apply_putty_plane', 'group': 'putty', 'kind': 'action', 'putty_tasks': ('apply',),
-        'label': '벽면 퍼티 도포',
-        'desc': 'YZ 벽 탐색→6 N 실측 확인→상향 도포. 현재 접촉 자세의 특이점 문제는 미해결입니다.',
-        'params': [_p('floor_force', '바닥 감지 변화량 (N)', 'number', 2.3),
-                   _p('wall_force', '벽 감지 변화량 (N)', 'number', 2.3),
-                   _p('press_force', '도포 목표 힘 (N)', 'number', 6.0),
-                   _p('apply_speed', '도포 속도 (mm/s)', 'number', 10.0, scale=True)],
-        'build': None, 'motion': lambda mode: True,
-    },
-    {
-        'id': 'return_spatula', 'group': 'putty', 'kind': 'action', 'putty_tasks': ('return',),
-        'label': '헤라 반납 (가상 전용)', 'desc': '보관 위치로 헤라 반납. 홈 이동은 초기화를 별도 요청합니다.',
-        'params': [_p('place_speed', '반납 속도 (mm/s)', 'number', 10.0, scale=True)],
-        'build': None, 'motion': lambda mode: True,
+        'build': lambda mode, p: [_run('putty_task_server', *_ros_params(process_virtual_mode=mode != 'real'))],
+        'motion': lambda mode: False,
     },
 
     # ===== SANDING =====
     {
-        'id': 'sanding_server', 'group': 'sanding', 'kind': 'service',
+        'id': 'tool_task_server', 'group': 'sanding', 'kind': 'service',
         'label': '샌딩 액션 서버',
-        'desc': '/dsr01/tool_task 액션 서버(sanding_server)를 띄운다. '
-                '[샌딩 작업 실행] 전에 먼저 시작해 두어야 함 (RG2 /onrobot 필요).',
-        'params': [
-            _p('retreat_on_cancel', '정지(STOP) 시 벽에서 후퇴', 'bool', False,
-               help_='끄면 STOP/E-STOP 때 그 자리에서 멈춤 (E-STOP 도 같은 취소로 오므로 기본 끔)'),
-            _p('go_home', '작업 전 항상 홈 자세로', 'bool', False,
-               help_='끄면 현재 팔 형태로 도구에 못 갈 때만 홈 [0,0,90,0,90,0] 으로 먼저 이동'),
-            _p('floor_z', '벽 아래 바닥 높이 z (mm)', 'number', 35.0,
-               help_='베이스 기준 바닥 높이. 바닥 근처(바닥+반지름+여유 아래) 시작/종료 z 는 전부 바닥에 붙여서 작업'),
-            _p('tool_radius', '원형 도구 반지름 (mm)', 'number', 45.0,
-               help_='도구 중앙을 잡으므로 벽 작업 때 도구 아래끝 = TCP - 반지름'),
-            _p('floor_clear', '바닥 여유 (mm)', 'number', 1.0,
-               help_='도구 아래끝과 바닥 사이 간격. 맨 아래가 덜 갈리면 줄이고(0~1), 바닥에 걸리면 늘리세요'),
-        ],
-        'build': lambda mode, p: [_run('sanding_server', *_ros_params(retreat_on_cancel=p['retreat_on_cancel'],
-                                                                      go_home=p['go_home'],
-                                                                      floor_z=p['floor_z'],
-                                                                      tool_radius=p['tool_radius'],
-                                                                      floor_clear=p['floor_clear']))],
-        'motion': lambda mode: False,
+        'desc': '/dsr01/tool_task + /process/sanding 액션 서버 (sanding_server). '
+                '[샌딩 작업 실행]·[공정(DB)] 샌딩 전에 먼저 시작 (RG2 /onrobot 필요).',
+        'params': [],
+        'build': lambda mode, p: [_run('tool_task_server')], 'motion': lambda mode: False,
     },
     {
         'id': 'sanding_goal', 'group': 'sanding', 'kind': 'action',
         'label': '샌딩 작업 실행',
-        'desc': '도구 집기 → 벽에 90도로 접촉 → 순응/힘제어 샌딩 (시작·중간·종료 모두 왕복) → 도구 반납. '
-                '시작/종료를 비우면 정해 둔 기본 작업.',
+        'desc': '도구 거치대에서 도구를 집고 → 시작점에서 종료점까지 직선으로 샌딩한다 (ToolTask goal 전송).',
         'params': [
             _p('tool_id', '도구 번호', 'select', '1', ['1', '2', '3'], help_='거치대에서 집을 도구 번호'),
             _p('start_posx', '시작 posx x,y,z,a,b,c', 'text', DEFAULT_START,
-               help_='비우면 기본 작업 (정해 둔 시작 관절각에서 +Y 10cm). '
-                     '넣으면: TCP 가 벽(또는 바닥)을 향하게 교시한 값, 툴 Z 로 벽 방향 자동 판단해 90도 보정'),
+               help_='작업 시작 위치 (BASE 기준, mm / deg)'),
             _p('end_posx', '종료 posx x,y,z,a,b,c', 'text', DEFAULT_END,
-               help_='종료 위치 (BASE 기준, 자세는 시작 자세 사용). 시작을 비우면 무시'),
-            _p('return_tool', '작업 후 도구 반납', 'bool', True, help_='끝나면 도구를 거치대에 다시 놓음'),
+               help_='작업 종료 위치 (BASE 기준, mm / deg)'),
+            _p('return_tool', '작업 후 도구 반납', 'bool', False, help_='끝나면 도구를 거치대에 다시 놓음'),
         ],
         'build': None, 'motion': lambda mode: True,
     },
@@ -349,11 +322,7 @@ def normalize_params(task, raw):
             value = str(value).strip()
             if any(c in value for c in '\n\r\0'):
                 raise ValueError(f'{spec["label"]}: 줄바꿈은 쓸 수 없습니다')
-            if key.endswith('_posx') and value:
-                parse_posx(value)   # 시작 전에 형식 검사 (비우면 샌딩 기본 작업)
         out[key] = value
-    if 'start_posx' in out and out['start_posx'] and not out.get('end_posx'):
-        raise ValueError('종료 posx 를 넣어 주세요 (시작/종료 둘 다 비우면 기본 작업)')
     return out
 
 

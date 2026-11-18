@@ -1,86 +1,40 @@
-# 팀 robot.yaml 양식. putty_scrape 값은 현재 현장 코드 설정을 보존해 병합했습니다.
-# PUTTY Process는 헤라 파지/퍼티 준비 후 도포만 수행합니다.
-# 주의: 목표 6 N과 현장 요청 함수의 최소 10 N 검사가 충돌하며 임의 변경하지 않았습니다.
+# 공통 설정 (코드 수정 없이 이 파일만 고치고 노드 재시작)
+# 단위: mm, deg, N, sec
+# 키 이름 규칙: 대분류_소분류  (예: putty_scrape)
+
 db:
-  host: 127.0.0.1
+  host: 127.0.0.1      # DB 서버 IP (서버 노트북)
   port: 3306
   user: cobot
   password: cobot
   database: cobot
+
 common:
   vel: 60
   acc: 60
-poses:
-  standby:
-    type: joint
-    value:
-    - 0
-    - 0
-    - 90
-    - 0
-    - 90
-    - 0
-force:
-  putty_scrape:
-    stiffness:
-    - 3000.0
-    - 3000.0
-    - 3000.0
-    - 200.0
-    - 200.0
-    - 200.0
-    target:
-    - 6.0
-    - 0.0
-    - 0.0
-    - 0.0
-    - 0.0
-    - 0.0
-    direction:
-    - 1
-    - 0
-    - 0
-    - 0
-    - 0
-    - 0
-    min_force: 5.0
-    tol: 1.0
-    wait_sec: 30.0
+
+poses:                 # 이름: {type: joint | task, value: [...]}
+  standby: {type: joint, value: [0, 0, 90, 0, 90, 0]}
+
+force:                 # 대분류_소분류: 힘제어 파라미터
+  putty_scrape:        # /process/putty 벽 도포 (BASE +X 단일 축 힘, putty_demo/action_protocol.py)
+    stiffness: [3000, 3000, 3000, 200, 200, 200]
+    target:    [10, 0, 0, 0, 0, 0]   # +X 10 N 이상이어야 함 (contact_search.press_force_request)
+    direction: [1, 0, 0, 0, 0, 0]
     ref: 0
-    mod: 1
-    floor_force: 2.3
-    wall_force: 2.3
-    search_distance: 20.0
-    search_speed: 2.0
-    stable_sec: 0.5
-    loss_sec: 0.5
-    transfer_speed: 30.0
-    apply_speed: 10.0
-    acceleration: 20.0
-    transfer_z: 245.14
-    edge_offset:
-    - 0.0
-    - 0.0
-    - 120.0
-    blade_angle: 20.0
-    blade_end_angle: 10.0
-    approach_distance: 50.0
-    samples: 21
-  putty_load:
-    joint_speed: null  # deg/s
-    joint_acceleration: null  # deg/s²
-    transfer_z: null  # BASE TCP 이송 높이. 헤라 날 높이가 아님.
-    transfer_speed: null
-    # Goal start/end는 헤라 접촉 시 BASE TCP XYZ. Tool 오프셋 중복 적용 금지.
-    contact_abc: [8.37, 178.03, 7.62]
-    tool_held_confirmed: false
+    mod: 0
+    tol: 2.0           # contact_ratio 계산: target ± tol 안이면 접촉 유지
+    wait_sec: 1.0
+  putty_load:          # /process/putty_load 판 묻히기 (BASE -Z 절대 힘). null = 퍼티 팀원 확정 전 → 요청 거부됨
+    tool_held_confirmed: false   # 실물: 헤라 파지를 사람이 확인한 뒤 true
     ref: 0
     mod: 0
     direction: [0, 0, 1, 0, 0, 0]
-    stiffness: [3000.0, 3000.0, 3000.0, 200.0, 200.0, 200.0]
+    contact_abc: [8.37, 178.03, 7.62]
+    stiffness: [3000, 3000, 3000, 200, 200, 200]
     approach_height: null
-    search_distance: 20.0
-    search_speed: 2.0
+    search_distance: null
+    search_speed: null
     contact_force: null
     hold_force: null
     force_limit: null
@@ -92,14 +46,12 @@ force:
     lift: null
     lift_speed: null
     acceleration: null
+
+putty_load_line:       # 판 묻히기 직선 (TCP XYZ, 날 접촉 시). end = start 에서 X+30~40 (load_putty.CONTACT_POSE 기준)
+  start: [-431.88, -1.52, 123.68]
+  end:   [-396.88, -1.52, 123.68]
+
 util:
-  singularity:
-    mode: avoid
-    retry: 1
-  camera_up:
-    z_threshold: 150
-manager:
-  poll_sec: 0.5
-  order:
-  - PUTTY
-  - SANDING
+  singularity: {mode: avoid, retry: 1}
+  camera_up:   {z_threshold: 150}
+

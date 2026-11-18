@@ -1,5 +1,5 @@
-"""매니저 테스트용 가짜 공정 서버 (로봇 안 움직임).
-/process/explore, /process/putty, /process/sanding 을 모두 받아서
+"""DB 흐름 테스트용 가짜 공정 서버 (로봇 안 움직임).
+/process/explore, /process/putty_load, /process/putty, /process/sanding 을 모두 받아서
 피드백 2번 보낸 뒤 성공. EXPLORE 는 벽 1개 + 틈 1개를 돌려준다.
 
 실행: ros2 run rokey1 fake_process
@@ -18,7 +18,7 @@ from utils.force_stats import summarize
 class Fake(Node):
     def __init__(self):
         super().__init__('fake_process')
-        for t in ('explore', 'putty', 'sanding'):
+        for t in ('explore', 'putty_load', 'putty', 'sanding'):
             ActionServer(self, Process, f'/process/{t}', self.execute)
 
     def execute(self, gh):

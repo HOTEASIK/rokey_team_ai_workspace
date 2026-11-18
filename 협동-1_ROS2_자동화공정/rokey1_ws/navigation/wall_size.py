@@ -2,28 +2,31 @@
 """두산 M0609 로 벽을 '더듬어서' 벽의 높이 / 너비를 재는 노드 (virtual / real).
 
 [알고리즘]
-  1. 시작(벽 찾기)  : 바닥 근처에서 벽 쪽(APPROACH 방향)으로 천천히 전진
-                       → 힘이 임계값을 넘으면 '막혔다' = 벽의 시작점
+  0. 시작          : 탐색 방향(dir: +x/-x/+y/-y)을 고르면 시작 자세 J1 / 공구 자세가 그 방향을 향함
+                       → base 에서 탐색 방향으로 start_dist 떨어진 지점 위에서 수직 하강 = 바닥 높이
+  1. 시작(벽 찾기)  : 바닥 + SEEK_CLEARANCE 높이에서 탐색 방향으로 max_dist 까지 전진
+                       (fast_until 까지는 빠르게, 그 뒤로는 천천히, 둘 다 접촉 감시)
+                       → 힘이 임계값을 넘으면 '막혔다' = 벽 표면. 이후 선 측정은 이 표면 기준
   2. 벽 따라가기    : 벽을 살짝 누른 채로 벽면을 따라 이동 (위로 / 옆으로)
                        → '비어있음(접촉 힘 사라짐)' 또는 '더 못 감(막힘/정체)' 상태가
                          END_HOLD_SEC(2초) 동안 계속되면 벽이 끝났다고 판단
                        → 마지막으로 벽에 닿아 있던 위치 = 벽의 끝점
   3. 선 측정        : 시작점 ~ 끝점 거리 = 그 선 위의 벽 길이
-                       - line_v : 바닥 → 위로   → 그 위치(x)에서의 벽 높이
-                       - line_h : 접촉점 → +x, 접촉점 → -x → 그 높이(z)에서의 벽 너비
+                       - line_v : 바닥 → 위로   → 그 위치(y)에서의 벽 높이
+                       - line_h : 접촉점 → +y, 접촉점 → -y → 그 높이(z)에서의 벽 너비
   4. 스윕           : 시작점을 STEP(10mm)씩 옮기며 3 을 반복
-                       - width  : z 를 STEP 씩 올리면서 x 방향(옆) 탐색 → 높이별 너비
-                       - height : x 를 STEP 씩 옮기면서 z 방향(위) 탐색 → 위치별 높이
+                       - width  : z 를 STEP 씩 올리면서 y 방향(옆) 탐색 → 높이별 너비
+                       - height : y 를 STEP 씩 옮기면서 z 방향(위) 탐색 → 위치별 높이
   5. 결과           : 각 스윕에서 '총 높이 / 총 너비' 출력 + ~/wall_scan_data/size_*.json 저장
 
 [좌표]  (모두 로봇 BASE 기준, mm)
         Z(위, UP_AXIS)
-        │      ┌────── 벽 (X-Z 평면) ──────┐
+        │      ┌────── 벽 (Y-Z 평면) ──────┐
         │      │                           │
-        │      │      로봇은 +Y 방향으로    │
+        │      │      로봇은 +X 방향으로    │
         │      │      벽을 바라본다        │
-  floor ┴──────┴───────────────────────────┴──── X (옆, LAT_AXIS)
-  - 옆 방향 = X, 위 방향 = Z, 벽을 향하는 방향 = +Y  (축 설정은 아래 '축 설정'에서 변경)
+  floor ┴──────┴───────────────────────────┴──── Y (옆, LAT_AXIS)
+  - 옆 방향 = Y, 위 방향 = Z, 벽을 향하는 방향 = +X  (축 설정은 아래 '축 설정'에서 변경)
 
 [공구 = 닫은 그리퍼 끝 (탐침)]
   - 시작할 때 그리퍼를 닫고 (DO1=ON, DO2=OFF), 닫힌 손가락 끝(TCP)으로 더듬는다.
@@ -31,7 +34,7 @@
 
             Z ↑        │ 벽
               │  그리퍼 │
-              │   ╲    │        공구 축 = (벽 쪽 +Y) 와 (아래 -Z) 사이 45° 대각선
+              │   ╲    │        공구 축 = (벽 쪽 +X) 와 (아래 -Z) 사이 45° 대각선
               │    ╲   │        → 손가락 끝만 바닥/벽에 닿고, 그리퍼 몸체는
               │     ●  │          뒤-위쪽으로 빠져 있어서 벽/바닥과 부딪히지 않는다
        ───────┴────────┴──── 바닥       ● = 닫힌 손가락 끝 (TCP)
@@ -50,6 +53,8 @@
   ros2 launch dsr_bringup2 dsr_bringup2_rviz.launch.py mode:=virtual host:=127.0.0.1 port:=12345 model:=m0609
 
   ros2 run rokey1 wall_size --ros-args -p mode:=virtual                      # width + height 스윕
+  ros2 run rokey1 wall_size --ros-args -p mode:=virtual -p dir:=+x -p start_dist:=300.0 \
+      -p max_dist:=800.0 -p fast_until:=450.0                               # 방향/거리 지정
   ros2 run rokey1 wall_size --ros-args -p mode:=virtual -p scan:=width       # z 올리며 너비 스윕
   ros2 run rokey1 wall_size --ros-args -p mode:=virtual -p scan:=height      # x 옮기며 높이 스윕
   ros2 run rokey1 wall_size --ros-args -p mode:=virtual -p scan:=line_v -p x:=0.0    # 높이 1줄
@@ -57,7 +62,7 @@
   ros2 run rokey1 wall_size --ros-args -p mode:=real -p step:=20.0          # 실제 로봇, 20mm 간격
   # 빠른 측정: 너비 3줄(바닥 위 50/150/250) + 높이 3줄(x 자동) → 평균/최소/최대
   ros2 run rokey1 wall_size --ros-args -p mode:=virtual -p scan:=lines
-  ros2 run rokey1 wall_size --ros-args -p mode:=real -p scan:=lines -p face:=500.0 \
+  ros2 run rokey1 wall_size --ros-args -p mode:=real -p scan:=lines -p dir:=+x -p start_dist:=300.0 \
       -p center:=0.0 -p lat_min:=-320.0 -p lat_max:=320.0 -p z_limit:=450.0 -p zs:="50,150,250" -p xs:=""
 
 [예외 처리]  암/툴에 예상 밖 힘이 걸리면 → force_guard.py (감지/분류/정지/후퇴)
@@ -71,10 +76,10 @@
         저장된 결과 다시 보기: ros2 run rokey1 wall_size_rviz
 
 [실제 로봇 전 체크리스트]
-  - WALL_FACE_GUESS : 벽 표면 Y 위치보다 '조금 앞' 으로 (줄자로 측정)
-  - FLOOR_Z_DEFAULT / FLOOR_SEARCH_START_Z : 바닥 높이 근처인지
+  - start_dist : 벽보다 확실히 앞 (바닥 찍는 곳). max_dist : 벽보다 뒤, 작업 반경 안
+  - floor_guess(FLOOR_Z_DEFAULT) : 대략적인 바닥 높이 (이 +60mm 부터 천천히 하강, -100mm 까지 탐색)
   - LAT_RANGE / Z_LIMIT : 벽보다 넓게, 하지만 로봇 작업 영역 안
-  - READY_J 자세에서 공구가 +Y(벽 방향)를 바라보는지 (티칭 펜던트로 확인)
+  - READY_J(J1=방향각, J2~J6=READY_SHAPE) 자세에서 공구가 벽 쪽으로 숙여져 있는지 (티칭 펜던트로 확인)
   - 처음엔 step 을 크게(예: 30), 속도는 낮게
 """
 import json
@@ -95,14 +100,14 @@ try:
     from navigation.wall_size_rviz import WallSizeViz
     from navigation.force_guard import (ForceGuard, Injector, ForceGuardError, ToolCollision,
                                         ArmCollision, ControllerStop, SensorFault,
-                                        MAX_TOOL_COLLISIONS, BAD_STATES)
+                                        MAX_TOOL_COLLISIONS, BAD_STATES, TORQUE_LIMIT)
 except ImportError:
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
     from wall_navigation import RobotIO
     from wall_size_rviz import WallSizeViz
     from force_guard import (ForceGuard, Injector, ForceGuardError, ToolCollision,
                              ArmCollision, ControllerStop, SensorFault,
-                             MAX_TOOL_COLLISIONS, BAD_STATES)
+                             MAX_TOOL_COLLISIONS, BAD_STATES, TORQUE_LIMIT)
 
 # =============================================================================
 # 로봇 설정
@@ -112,19 +117,33 @@ ROBOT_MODEL = 'm0609'
 
 # =============================================================================
 # 축 설정  (0=X, 1=Y, 2=Z)
+#   탐색 방향(dir 파라미터: +x / -x / +y / -y)을 고르면 configure_direction() 이
+#   아래 값들(벽 방향 축/부호, 옆 축, 공구 자세, 시작 자세 J1)을 자동으로 다시 정한다.
 # =============================================================================
-LAT_AXIS = 0            # 옆 방향 (너비를 재는 축)
-APPROACH_AXIS = 1       # 벽을 향하는 축
+LAT_AXIS = 1            # 옆 방향 (너비를 재는 축)
+APPROACH_AXIS = 0       # 벽을 향하는 축
 APPROACH_SIGN = +1.0    # +1: +축 방향으로 가면 벽, -1: -축 방향으로 가면 벽
 UP_AXIS = 2             # 위 방향 (높이를 재는 축)
+AX_NAME = 'xyz'
 
-# 그리퍼 기울기: 0 = 벽을 수평으로 봄, 90 = 바닥을 수직으로 봄 → 45 = 바닥/벽 모두에서 45°
+# 방향 → (벽 방향 축, 부호, 옆 축, 공구/J1 회전각[deg])
+DIRECTIONS = {
+    '+x': (0, +1.0, 1, 0.0),
+    '-x': (0, -1.0, 1, 180.0),
+    '+y': (1, +1.0, 0, 90.0),
+    '-y': (1, -1.0, 0, -90.0),
+}
+DIRECTION = '+x'
+
+# 그리퍼 기울기: 0 = 벽을 수평으로 봄, 90 = 바닥을 수직으로 봄
 TILT_DEG = 75.0  # 45° 는 벽 아래쪽에서 손목 특이점(J5≈0) 통과 → J4/J6 꼬임. 75° 는 J5≥22°
 # ZYZ [a, b, c]: 공구 Z축 = (cos a·sin b, sin a·sin b, cos b)
-#   a=90, b=90+45=135 → (0, 0.707, -0.707) = 벽 쪽(+Y) 45° + 아래(-Z) 45°
+#   a = 탐색 방향 회전각, b = 90+TILT → 벽 쪽으로 (90-TILT)° + 아래(-Z) 쪽으로 숙임
 #   c = 공구 축 둘레 회전 (손가락이 벌어지는 방향). 필요하면 바꿀 것
-TOOL_ORI = [90.0, 90.0 + TILT_DEG, 0.0]
-READY_J = [90.0, 0.0, 90.0, 0.0, TILT_DEG, 0.0]  # 시작 자세 (J1=90 → +Y, J5=45 → 45° 숙임)
+TOOL_ORI = [0.0, 90.0 + TILT_DEG, 0.0]
+# 시작 자세 J2~J6 (J1 은 탐색 방향 회전각). J2+J3+J5 = 165.2° ≈ 90+TILT → TOOL_ORI 와 같은 숙임
+READY_SHAPE = [35.4, 64.5, 0.0, 65.3, 0.0]
+READY_J = [0.0] + READY_SHAPE
 HOME_J = [0.0, 0.0, 90.0, 0.0, 90.0, 0.0]
 
 # 그리퍼 (tape_peel.py / sun_gear.py 와 같은 배선): 닫기 = DO1 ON, DO2 OFF
@@ -135,19 +154,27 @@ GRIP_WAIT_SEC = 1.0         # 그리퍼가 다 닫힐 때까지 대기
 # =============================================================================
 # 탐색 영역  (mm)
 # =============================================================================
-WALL_FACE_GUESS = 500.0     # 벽 표면이 있을 것이라 '예상'하는 APPROACH 축 좌표
-APPROACH_GAP = 40.0         # 예상 표면보다 이만큼 앞에서 전진 시작 / 후퇴 거리
-SEARCH_DEPTH = 60.0         # 예상 표면보다 이만큼 더 들어가도 안 닿으면 '벽 없음'
+# 처음 벽 찾기 (긴 탐색): base 에서 탐색 방향으로 START_DIST 지점에서 바닥을 찍고,
+# 그 자리에서 탐색 방향으로 MAX_DIST 까지 전진하며 벽을 찾는다.
+START_DIST = 300.0          # base 기준 바닥 찍을 거리 [mm] (벽보다 확실히 앞이어야 함)
+MAX_DIST = 800.0            # base 기준 이 거리까지 가도 안 닿으면 '벽 없음' → 중단
+FAST_UNTIL = 0.0            # base 기준 이 거리까지는 빠르게 전진 (벽이 확실히 없는 구간). 0 = 처음부터 천천히
+FAST_PROBE_VELOCITY = 30.0  # 빠른 구간 속도 [mm/s] (빠른 구간도 접촉 감시는 계속함)
+SEEK_CLEARANCE = 25.0       # 처음 벽 찾을 때 바닥 위 높이 (낮으면 바닥 요철에 걸림)
 
-LAT_CENTER_GUESS = 0.0      # 벽 가운데쯤의 옆(X) 위치 (너비 스윕 첫 줄 시작점)
-LAT_RANGE = (-320.0, 320.0) # 옆 방향 탐색 한계 (벽보다 넓게! 높이 스윕 x 범위 + 따라가기 한계)
+APPROACH_GAP = 40.0         # 측정한 표면보다 이만큼 앞에서 전진 시작 / 후퇴 거리
+SEARCH_DEPTH = 60.0         # 측정한 표면보다 이만큼 더 들어가도 안 닿으면 '벽 없음'
+
+LAT_CENTER_GUESS = 0.0      # 벽 가운데쯤의 옆 위치 (바닥 찍기/첫 벽 찾기/너비 스윕 첫 줄)
+LAT_RANGE = (-320.0, 320.0) # 옆 방향 탐색 한계 (벽보다 넓게! 높이 스윕 범위 + 따라가기 한계)
 Z_LIMIT = 450.0             # 위 방향 탐색 한계 (벽 윗면보다 높게. 너비 스윕 z 범위 + 따라가기 한계)
 
 FLOOR_DETECT = True         # 시작할 때 아래로 내려가서 바닥 높이를 직접 잰다
-FLOOR_Z_DEFAULT = 50.0      # 바닥 측정 안 할 때 / 실패했을 때 쓸 바닥 높이
-FLOOR_SEARCH_START_Z = 100.0  # 바닥 찾기 시작 높이
-FLOOR_SEARCH_DEPTH = 100.0    # 여기까지 내려가도 안 닿으면 바닥 측정 실패
-FLOOR_CLEARANCE = 5.0       # 바닥에서 이만큼 띄운 높이에서 벽 쪽으로 전진
+FLOOR_Z_DEFAULT = 50.0      # 바닥 높이 추정값 (빠른 하강 구간 계산 / 측정 생략·virtual 실패 시 사용)
+FLOOR_SLOW_ZONE = 60.0      # 추정 바닥 + 이 높이부터는 천천히 하강 (그 위는 빠르게)
+FLOOR_BELOW_GUESS = 100.0   # 추정 바닥보다 이만큼 더 내려가도 안 닿으면 바닥 측정 실패
+FLOOR_RETREAT = 30.0        # 바닥 찍은 뒤 이만큼 위로 올라감
+FLOOR_CLEARANCE = 5.0       # 바닥에서 이만큼 띄운 높이에서 벽 쪽으로 전진 (높이 측정 선)
 
 STEP = 10.0                 # 스윕 간격 [mm]  (알고리즘 4번의 '10 단위')
 MISS_LIMIT = 2              # 벽을 찾은 뒤 연속 N 번 벽이 없으면 스윕 종료
@@ -160,7 +187,13 @@ MOVE_VELOCITY, MOVE_ACC = 100.0, 200.0
 PROBE_VELOCITY, PROBE_ACC = 10.0, 50.0       # 벽/바닥 찾을 때 전진 속도
 FOLLOW_VELOCITY, FOLLOW_ACC = 20.0, 50.0     # 벽 따라갈 때 속도
 
-CONTACT_FORCE = 5.0         # 벽/바닥 '막힘' 판정 힘 [N]
+CONTACT_FORCE = 5.0         # 벽/바닥 '막힘' 판정 힘 [N] (탐색 중엔 힘 크기 |F| 기준)
+# 접촉 '시작' 징후: 힘이 CONTACT_FORCE 의 이 비율 이상 + 툴 모멘트가 가드 상한의 이 비율 이상이면
+# 접촉으로 본다. 팔을 많이 뻗으면 관절 토크 역산 오차로 모멘트가 힘보다 먼저 커져서, 바닥에
+# 닿았는데도 '몸체 충돌(TOOL_TORQUE)' 로 멈추는 것을 막기 위함.
+CONTACT_EARLY_FORCE_RATIO = 0.6
+CONTACT_EARLY_TORQUE_RATIO = 0.6
+REACH_WARN_RATIO = 0.85     # 바닥 찍는 곳/벽이 도달 한계의 이 비율 이상이면 경고 (힘 추정 부정확)
 FREE_FORCE = 2.0            # 따라가는 중 이 힘보다 작으면 '비어있음'
 BLOCK_FORCE = 15.0          # 진행 방향 힘이 이 이상이면 '더 못 감'
 # 사고(충돌) 판정 임계값 / 처리는 force_guard.py 에 있음 (툴 과부하, 옆 충돌, 암 충돌, 안전정지 ...)
@@ -183,7 +216,6 @@ SING_WARN_DEG = 5.0          # 사전 점검: |J5| 가 이보다 작은 위치�
 VALID_REASONS = ('free', 'blocked')   # 이 이유로 끝난 선만 결과에 사용
 
 SAMPLE_PERIOD = 0.02
-PROBE_TIMEOUT = 30.0
 FOLLOW_TIMEOUT = 120.0
 PATH_MIN_MM = 1.0           # 경로 기록 간격 (이만큼 움직여야 새 점 추가)
 
@@ -215,6 +247,26 @@ def _tool_dir(ori):
 TOOL_DIR = _tool_dir(TOOL_ORI)
 UP_DIR = UNIT[UP_AXIS]
 LAT_DIR = UNIT[LAT_AXIS]
+
+
+def configure_direction(name):
+    """탐색 방향(+x/-x/+y/-y)에 맞게 축/부호/공구 자세/시작 자세를 다시 정한다.
+    모듈 전역값을 바꾸므로 측정 객체를 만들기 전에 한 번만 호출할 것."""
+    global DIRECTION, APPROACH_AXIS, APPROACH_SIGN, LAT_AXIS, TOOL_ORI, READY_J
+    global APP_DIR, TOOL_DIR, LAT_DIR
+    key = str(name).strip().lower()
+    if key in ('x', 'y'):
+        key = '+' + key
+    if key not in DIRECTIONS:
+        raise ValueError(f'dir 은 {list(DIRECTIONS)} 중 하나: {name}')
+    APPROACH_AXIS, APPROACH_SIGN, LAT_AXIS, yaw = DIRECTIONS[key]
+    DIRECTION = key
+    TOOL_ORI = [yaw, 90.0 + TILT_DEG, 0.0]
+    READY_J = [yaw] + list(READY_SHAPE)
+    APP_DIR = UNIT[APPROACH_AXIS] * APPROACH_SIGN
+    TOOL_DIR = _tool_dir(TOOL_ORI)
+    LAT_DIR = UNIT[LAT_AXIS]
+    return key
 
 
 def make_point(lat, app, up):
@@ -296,7 +348,7 @@ class SizeIO(RobotIO):
         super().wait_for_services()
         d = self.dsr
         ServiceWaiter(self.node).wait(d._ros2_set_digital_output, d._ros2_set_singularity_handling,
-                                      d._ros2_ikin, d._ros2_get_current_solution_space)
+                                      d._ros2_ikin, d._ros2_fkin, d._ros2_get_current_solution_space)
 
     def set_singularity(self, var_vel):
         """특이점 처리: True → DR_VAR_VEL (경로 유지, 감속), False → DR_AVOID (기본)."""
@@ -308,12 +360,25 @@ class SizeIO(RobotIO):
             f'{"" if ret == 0 else " - 설정 실패!"}')
         return ret == 0
 
-    def joint_at(self, xyz, sol_space):
-        """역기구학: TCP 위치 → 관절각 [deg] (실패/도달 불가면 None)."""
+    def joint_at(self, xyz, sol_space, tol=2.0):
+        """역기구학: TCP 위치 → 관절각 [deg] (실패/도달 불가면 None).
+        컨트롤러 ikin 은 도달 불가여도 success=true 로 아무 값이나 돌려주므로,
+        fkin 으로 다시 계산해서 목표 위치와 tol[mm] 이상 다르면 도달 불가로 본다."""
         q = self.dsr.ikin(self._posx(xyz), sol_space, ref=self.dsr.DR_BASE)
-        if not isinstance(q, (list, tuple)) or len(q) < 6:
+        try:
+            q = [float(v) for v in q]           # ROS 응답은 numpy 배열 (list/tuple 아님)
+        except TypeError:
             return None
-        return [float(v) for v in q]
+        if len(q) < 6 or not all(np.isfinite(q)):
+            return None
+        p = self.dsr.fkin(self.dsr.posj(*q[:6]), ref=self.dsr.DR_BASE)
+        try:
+            p = [float(v) for v in p]
+        except TypeError:
+            return None
+        if len(p) < 3 or np.linalg.norm(np.subtract(p[:3], np.asarray(xyz, float)[:3])) > tol:
+            return None
+        return q
 
     def gripper_close(self):
         """그리퍼를 닫아 손가락 끝을 탐침으로 쓴다."""
@@ -349,7 +414,7 @@ class WallSizeMeasurer:
         self.skipped = []           # 툴 충돌로 건너뛴 선
         self.path = []              # TCP 경로 [[x, y, z, phase], ...]
         self.lines = []             # 선 측정 결과 [{'kind','p0','p1','value'}]
-        self.face_a = WALL_FACE_GUESS
+        self.face_a = MAX_DIST      # 처음 벽 찾기(seek_first_wall)에서 측정값으로 바뀜
         self.floor_z = None
         self.results = {}
         io.on_move = lambda xyz: self.trace(xyz, 'move', publish=True)
@@ -409,51 +474,185 @@ class WallSizeMeasurer:
             self.io.node.get_logger().warn(f'RViz 퍼블리시 실패: {e}')
 
     # ------------------------------------------------------------ 가드 이동
-    def guarded_move(self, start, direction, dist, axis, vel=PROBE_VELOCITY):
-        """start 에서 direction 으로 dist 만큼 천천히 가다가 axis 축 힘이
-        CONTACT_FORCE 이상이면 정지. Returns: 접촉 위치 또는 None."""
-        start = np.asarray(start, float)
+    def guarded_move(self, start, direction, dist, axis, vel=PROBE_VELOCITY, fast_dist=0.0):
+        """start 에서 direction 으로 dist 만큼 가다가 axis 축 힘이 CONTACT_FORCE 이상이면 정지.
+        fast_dist > 0 이면 처음 fast_dist 는 FAST_PROBE_VELOCITY 로, 나머지는 vel 로 간다
+        (두 구간 모두 접촉 감시). Returns: 접촉 위치 또는 None."""
+        start = np.asarray(start, float)[:3]
         self.io.move_l(start)
         self.io.zero_force()
-        self.io.amove_l(start + direction * dist, vel, PROBE_ACC)
-        contact = None
+        fast_dist = float(np.clip(fast_dist, 0.0, dist))
+        segments = []
+        if fast_dist > STALL_MM:
+            segments.append((fast_dist, FAST_PROBE_VELOCITY))
+        if dist - fast_dist > STALL_MM:
+            segments.append((dist, vel))
+        for d, v in segments:
+            contact, finished = self._probe_segment(start + direction * d, direction, axis, v)
+            if contact is not None or not finished:
+                return contact
+        return None
+
+    def _probe_segment(self, target, direction, axis, vel):
+        """target 까지 vel 로 가며 접촉 감시. Returns: (접촉 위치 또는 None, 목표까지 다 갔는지)."""
+        seg_len = float(np.linalg.norm(target - self.io.get_pos()))
+        timeout = seg_len / max(vel, 1e-3) * 1.5 + 5.0
+        self.io.amove_l(target, vel, PROBE_ACC)
+        contact, finished = None, False
         t0 = time.time()
-        while time.time() - t0 < PROBE_TIMEOUT:
+        while True:
             pos = self.io.get_pos()
             self.trace(pos, 'seek')
-            f = self.sense(pos, (direction,), 'seek')
-            if abs(f[axis]) >= CONTACT_FORCE:
+            f = np.asarray(self.sense(pos, (direction,), 'seek'), float)
+            fn = float(np.linalg.norm(f[:3]))
+            mn = float(np.linalg.norm(f[3:6])) if len(f) >= 6 else 0.0
+            early = (fn >= CONTACT_FORCE * CONTACT_EARLY_FORCE_RATIO
+                     and mn >= TORQUE_LIMIT * CONTACT_EARLY_TORQUE_RATIO)
+            if abs(f[axis]) >= CONTACT_FORCE or fn >= CONTACT_FORCE or early:
                 self.io.stop()
                 contact = pos
+                self.io.node.get_logger().info(
+                    f'  -> 접촉 (힘 {fn:.1f}N, {AX_NAME[axis]}축 {f[axis]:+.1f}N, 모멘트 {mn:.2f}Nm'
+                    + (', 모멘트 기준 조기 판정)' if early and fn < CONTACT_FORCE else ')'))
                 break
             if time.time() - t0 > 0.5 and not self.io.is_moving():
+                finished = True
+                break
+            if time.time() - t0 > timeout:
+                self.io.stop()
+                self.io.node.get_logger().info('  -> 가드 이동 시간 초과')
                 break
             time.sleep(SAMPLE_PERIOD)
-        else:
-            self.io.stop()
-            self.io.node.get_logger().info('  -> 가드 이동 시간 초과')
         self.io.wait_motion_done()
-        return contact
+        return contact, finished
+
+    # ------------------------------------------------------------ 작업 영역 점검
+    def check_reach(self):
+        """처음 탐색 경로(시작 거리 ~ 최대 거리)가 역기구학으로 도달 가능한지 미리 확인.
+        최대 거리가 안 닿으면 닿는 곳까지 줄이고, 시작 지점이 안 닿으면 중단."""
+        global MAX_DIST
+        try:
+            sol = self.io.dsr.get_current_solution_space()
+            if not isinstance(sol, int) or sol < 0:
+                self.io.node.get_logger().info('[도달 점검] solution space 를 못 읽어서 건너뜀')
+                return
+            z_seek = FLOOR_Z_DEFAULT + SEEK_CLEARANCE
+            z_ready = float(self.io.get_pos()[UP_AXIS])
+            ok = self.io.joint_at
+        except Exception as e:
+            self.io.node.get_logger().info(f'[도달 점검] 실패해서 건너뜀: {e}')
+            return
+        try:
+            # 지금 TCP 위치(확실히 도달 가능)도 실패하면 ikin/fkin 점검 자체를 믿을 수 없음 → 건너뜀
+            if ok(self.io.get_pos(), sol) is None:
+                self.io.node.get_logger().warn(
+                    '[도달 점검] 현재 위치도 역기구학 검산 실패 → 점검 결과를 믿을 수 없어 건너뜀')
+                return
+        except Exception as e:
+            self.io.node.get_logger().info(f'[도달 점검] 실패해서 건너뜀: {e}')
+            return
+        for z in (z_ready, z_seek):
+            if ok(make_point(LAT_CENTER_GUESS, START_DIST, z), sol) is None:
+                raise RuntimeError(f'시작 지점 도달 불가 ({AX_NAME[APPROACH_AXIS]} 방향 {START_DIST:.0f}mm, '
+                                   f'z={z:.0f}) → start_dist 확인')
+        # 바닥 근처 높이에서 탐색 방향으로 닿는 최대 거리 (도달 한계)
+        reach = START_DIST
+        while reach < 1200.0 and ok(make_point(LAT_CENTER_GUESS, reach + 10.0, z_seek), sol) is not None:
+            reach += 10.0
+        self.reach, self.sol = reach, sol
+        if reach < MAX_DIST:
+            if reach <= START_DIST + 50.0:
+                raise RuntimeError(f'탐색 구간 대부분이 도달 불가 (한계 {reach:.0f}mm) → start_dist/max_dist 확인')
+            self.io.node.get_logger().info(
+                f'[도달 점검] 최대 거리 {MAX_DIST:.0f}mm 는 도달 불가 → {reach:.0f}mm 까지만 탐색')
+            MAX_DIST = reach
+        else:
+            self.io.node.get_logger().info(
+                f'[도달 점검] {START_DIST:.0f} ~ {MAX_DIST:.0f}mm 도달 가능 (한계 약 {reach:.0f}mm)')
+        if START_DIST >= reach * REACH_WARN_RATIO:
+            self.io.node.get_logger().warn(
+                f'[도달 점검] 출발 거리 {START_DIST:.0f}mm 가 도달 한계 {reach:.0f}mm 의 '
+                f'{START_DIST / reach * 100:.0f}% → 팔이 거의 펴진 자세라 힘 추정이 부정확하고 '
+                f'벽 위쪽은 닿지 않을 수 있음. 벽을 로봇 쪽으로 옮기고 출발 거리를 '
+                f'{reach * 0.6:.0f}mm 이하로 권장')
+
+    def check_wall_reach(self):
+        """벽 표면을 찾은 뒤: 그 표면에서 위(Z_LIMIT)까지 닿는지, 벽이 도달 한계에 가까운지 경고."""
+        reach, sol = getattr(self, 'reach', None), getattr(self, 'sol', None)
+        if reach is None:
+            return
+        if self.face_a >= reach * REACH_WARN_RATIO:
+            self.io.node.get_logger().warn(
+                f'[도달 점검] 벽 표면 {self.face_a:.0f}mm 가 도달 한계 {reach:.0f}mm 의 '
+                f'{self.face_a / reach * 100:.0f}% → 힘 추정이 부정확해 툴 충돌 오판이 생길 수 있음')
+        try:
+            top = None
+            for z in np.arange(self.floor_z + FLOOR_CLEARANCE, Z_LIMIT + 1e-6, 20.0):
+                if self.io.joint_at(make_point(LAT_CENTER_GUESS, self.face_a, z), sol) is None:
+                    top = z
+                    break
+            if top is not None:
+                self.io.node.get_logger().warn(
+                    f'[도달 점검] 벽 표면에서 z={top:.0f} 이상은 도달 불가 (높이 한계 {Z_LIMIT:.0f}) '
+                    f'→ 벽이 그보다 높으면 높이 측정이 중간에 끊김(limit). 벽을 더 가깝게 두세요')
+        except Exception as e:
+            self.io.node.get_logger().info(f'[도달 점검] 벽 위쪽 점검 실패해서 건너뜀: {e}')
 
     # ------------------------------------------------------------ 바닥
     def detect_floor(self):
-        """벽 앞에서 아래로 내려가 바닥 높이를 잰다 ('바닥부터 시작')."""
+        """base 에서 탐색 방향으로 START_DIST 떨어진 지점 위로 가서 수직 하강 → 바닥 높이."""
         if not FLOOR_DETECT:
             self.floor_z = FLOOR_Z_DEFAULT
             self.io.node.get_logger().info(f'[바닥] 측정 생략 → 설정값 {self.floor_z:.1f} 사용')
             return self.floor_z
-        start = make_point(LAT_CENTER_GUESS, self.face_a - APPROACH_GAP, FLOOR_SEARCH_START_Z)
-        self.io.node.get_logger().info('[바닥] 아래로 내려가며 바닥 찾기')
-        c = self.guarded_move(start, -UP_DIR, FLOOR_SEARCH_DEPTH, UP_AXIS)
-        self.io.move_l(start, vel=PROBE_VELOCITY * 3, expect=(UP_DIR,))      # 바닥에서 떨어지기
+        z0 = float(self.io.get_pos()[UP_AXIS])          # 시작 자세 높이 그대로 수평 이동
+        start = make_point(LAT_CENTER_GUESS, START_DIST, z0)
+        min_z = FLOOR_Z_DEFAULT - FLOOR_BELOW_GUESS
+        depth = z0 - min_z
+        if depth <= STALL_MM:
+            raise RuntimeError(f'시작 높이 z={z0:.0f} 가 바닥 탐색 하한 {min_z:.0f} 보다 낮음')
+        fast = max(0.0, z0 - (FLOOR_Z_DEFAULT + FLOOR_SLOW_ZONE))
+        self.io.node.get_logger().info(
+            f'[바닥] {DIRECTION} 방향 {START_DIST:.0f}mm 지점에서 수직 하강 '
+            f'(z {z0:.0f} → 최저 {min_z:.0f}, 처음 {fast:.0f}mm 는 빠르게)')
+        c = self.guarded_move(start, -UP_DIR, depth, UP_AXIS, fast_dist=fast)
         if c is None:
+            self.io.move_l(start, vel=PROBE_VELOCITY * 3, expect=(UP_DIR,))
+            if self.io.mode == 'real':
+                raise RuntimeError(f'바닥을 찾지 못함 (z={min_z:.0f} 까지) → 바닥 추정값/시작 거리 확인')
             self.io.node.get_logger().info(f'  -> 바닥 못 찾음 → 설정값 {FLOOR_Z_DEFAULT:.1f} 사용')
             self.floor_z = FLOOR_Z_DEFAULT
         else:
             self.floor_z = float(c[UP_AXIS])
             self.add_point('floor', c, CONTACT_FORCE)
+            self.io.move_l(np.asarray(c, float) + UP_DIR * FLOOR_RETREAT,
+                           vel=PROBE_VELOCITY * 3, expect=(UP_DIR,))           # 바닥에서 떨어지기
             self.io.node.get_logger().info(f'  -> 바닥 Z = {self.floor_z:.2f}')
         return self.floor_z
+
+    def seek_first_wall(self):
+        """바닥 찍은 지점(START_DIST)에서 바닥+SEEK_CLEARANCE 높이로 탐색 방향으로 MAX_DIST 까지
+        전진 → 처음 막히는 곳 = 벽 표면. 이후 선 측정들은 이 표면 기준으로 짧게 탐색한다."""
+        up = self.floor_z + SEEK_CLEARANCE
+        start = make_point(LAT_CENTER_GUESS, START_DIST, up)
+        dist = MAX_DIST - START_DIST
+        fast = (FAST_UNTIL - START_DIST) if FAST_UNTIL > START_DIST else 0.0
+        self.io.node.get_logger().info(
+            f'[벽 찾기] {DIRECTION} 방향으로 {START_DIST:.0f} → {MAX_DIST:.0f}mm 전진 (z={up:.0f}'
+            + (f', {FAST_UNTIL:.0f}mm 까지 빠르게)' if fast > 0 else ')'))
+        c = self.guarded_move(start, APP_DIR, dist, APPROACH_AXIS, fast_dist=fast)
+        if c is None:
+            self.io.move_l(start, vel=MOVE_VELOCITY)
+            raise RuntimeError(f'{DIRECTION} 방향 {MAX_DIST:.0f}mm 까지 벽이 없음 → max_dist/방향 확인')
+        c = np.asarray(c, float)
+        self.io.move_l(c - APP_DIR * APPROACH_GAP, vel=PROBE_VELOCITY * 3, expect=(APP_DIR,))   # 후퇴
+        self.face_a = app_of(c)
+        self.add_point('probe', c, CONTACT_FORCE)
+        self.update_rviz(force=True)
+        self.io.node.get_logger().info(
+            f'  -> 벽 표면 {AX_NAME[APPROACH_AXIS]} = {c[APPROACH_AXIS]:.1f} '
+            f'(base 에서 {self.face_a:.1f}mm)')
+        return c
 
     # ------------------------------------------------------------ 알고리즘 1
     def seek_wall(self, lat, up):
@@ -571,7 +770,7 @@ class WallSizeMeasurer:
     # ------------------------------------------------------------ 알고리즘 3
     def measure_height_line(self, lat):
         """lat 위치에서 바닥 → 위로 따라가 벽 높이 측정."""
-        self.io.node.get_logger().info(f'[높이 측정] x={lat:.1f}')
+        self.io.node.get_logger().info(f'[높이 측정] {AX_NAME[LAT_AXIS]}={lat:.1f}')
         c = self.seek_wall(lat, self.floor_z + FLOOR_CLEARANCE)
         if c is None:
             self.io.node.get_logger().info('  -> 벽 없음')
@@ -592,7 +791,7 @@ class WallSizeMeasurer:
 
     def measure_width_line(self, up, center):
         """up 높이에서 벽을 찾은 뒤 +옆 / -옆으로 따라가 너비 측정."""
-        self.io.node.get_logger().info(f'[너비 측정] z={up:.1f} (시작 x={center:.1f})')
+        self.io.node.get_logger().info(f'[너비 측정] z={up:.1f} (시작 {AX_NAME[LAT_AXIS]}={center:.1f})')
         c = self.seek_wall(center, up)
         if c is None:
             self.io.node.get_logger().info('  -> 벽 없음')
@@ -606,7 +805,7 @@ class WallSizeMeasurer:
             p0[LAT_AXIS], p1[LAT_AXIS] = left[LAT_AXIS], right[LAT_AXIS]
             self.add_line('width', p0, p1, w)
             self.io.node.get_logger().info(
-                f'  -> 너비 {w:.1f} mm (x {left[LAT_AXIS]:.1f} ~ {right[LAT_AXIS]:.1f}, '
+                f'  -> 너비 {w:.1f} mm ({AX_NAME[LAT_AXIS]} {left[LAT_AXIS]:.1f} ~ {right[LAT_AXIS]:.1f}, '
                 f'종료={r2}/{r1})')
         else:
             self.io.node.get_logger().info(f'  -> [무효] 종료={r2}/{r1} → 결과에서 제외 (측정값 {w:.1f} mm)')
@@ -650,8 +849,8 @@ class WallSizeMeasurer:
 
     # ------------------------------------------------------------ 알고리즘 4, 5
     def sweep_widths(self):
-        """z 를 STEP 씩 올리면서 옆(x) 방향 너비 측정 → 총 높이/너비."""
-        self.io.node.get_logger().info(f'=== 너비 스윕: z 를 {STEP:.0f}mm 씩 올리며 x 방향 탐색 ===')
+        """z 를 STEP 씩 올리면서 옆(y) 방향 너비 측정 → 총 높이/너비."""
+        self.io.node.get_logger().info(f'=== 너비 스윕: z 를 {STEP:.0f}mm 씩 올리며 {AX_NAME[LAT_AXIS]} 방향 탐색 ===')
         rows, center, misses = [], LAT_CENTER_GUESS, 0
         for up in np.arange(self.floor_z + FLOOR_CLEARANCE, Z_LIMIT + 1e-6, STEP):
             r = self.run_line(self.measure_width_line, float(up), center)
@@ -685,8 +884,8 @@ class WallSizeMeasurer:
         return out
 
     def sweep_heights(self):
-        """x 를 STEP 씩 옮기면서 위(z) 방향 높이 측정 → 총 높이/너비."""
-        self.io.node.get_logger().info(f'=== 높이 스윕: x 를 {STEP:.0f}mm 씩 옮기며 z 방향 탐색 ===')
+        """y 를 STEP 씩 옮기면서 위(z) 방향 높이 측정 → 총 높이/너비."""
+        self.io.node.get_logger().info(f'=== 높이 스윕: {AX_NAME[LAT_AXIS]} 를 {STEP:.0f}mm 씩 옮기며 z 방향 탐색 ===')
         cols, misses = [], 0
         for lat in np.arange(LAT_RANGE[0], LAT_RANGE[1] + 1e-6, STEP):
             r = self.run_line(self.measure_height_line, float(lat))
@@ -706,7 +905,7 @@ class WallSizeMeasurer:
             out['total_height'] = best['height']
             out['total_width'] = cols[-1]['lat'] - cols[0]['lat']      # 해상도 = STEP (벽에 닿기만 하면 됨)
             self.io.node.get_logger().info(
-                f'[높이 스윕 결과] 총 높이 {out["total_height"]:.1f} mm (x={best["lat"]:.0f}), '
+                f'[높이 스윕 결과] 총 높이 {out["total_height"]:.1f} mm ({AX_NAME[LAT_AXIS]}={best["lat"]:.0f}), '
                 f'총 너비 ≈ {out["total_width"]:.1f} mm (+최대 {2 * STEP:.0f}, 벽이 닿은 첫/끝 열 기준), '
                 f'무효 {out["invalid"]}/{len(cols)}열')
         elif cols:
@@ -737,7 +936,7 @@ class WallSizeMeasurer:
                 xs = [center - half, center, center + half]
             else:
                 xs = [center]
-            self.io.node.get_logger().info(f'[빠른 측정] 높이 줄 위치 자동: x = {[round(x, 1) for x in xs]}')
+            self.io.node.get_logger().info(f'[빠른 측정] 높이 줄 위치 자동: {AX_NAME[LAT_AXIS]} = {[round(x, 1) for x in xs]}')
         for x in xs:
             r = self.run_line(self.measure_height_line, float(x))
             if isinstance(r, dict):
@@ -789,7 +988,7 @@ class WallSizeMeasurer:
                 self.io.node.get_logger().info('[특이점 점검] 탐색 영역에 손목 특이점 없음')
             if unreachable:
                 self.io.node.get_logger().info(f'[특이점 점검] 도달 불가/역기구학 실패 {len(unreachable)}곳 '
-                                               f'(예: x={unreachable[0][0]:.0f}, z={unreachable[0][1]:.0f}) → 영역 확인')
+                                               f'(예: {AX_NAME[LAT_AXIS]}={unreachable[0][0]:.0f}, z={unreachable[0][1]:.0f}) → 영역 확인')
         except Exception as e:
             self.io.node.get_logger().info(f'[특이점 점검] 실패해서 건너뜀: {e}')
 
@@ -820,6 +1019,8 @@ class WallSizeMeasurer:
             'mode': self.io.mode, 'robot_model': ROBOT_MODEL,
             'created': datetime.now().isoformat(timespec='seconds'),
             'config': {'step': STEP, 'end_hold_sec': END_HOLD_SEC, 'tilt_deg': TILT_DEG,
+                       'direction': DIRECTION, 'start_dist': START_DIST, 'max_dist': MAX_DIST,
+                       'ready_j': READY_J,
                        'probe': 'closed_gripper_tip', 'axes': {
                 'lat': LAT_AXIS, 'approach': APPROACH_AXIS, 'approach_sign': APPROACH_SIGN,
                 'up': UP_AXIS}, 'tool_ori': TOOL_ORI},
@@ -864,8 +1065,12 @@ def go_home_after_stop(io, guard, policy):
         except Exception:
             pass
     try:
-        pos = io.get_pos()
-        io.move_l(pos - APP_DIR * APPROACH_GAP, expect=(APP_DIR,))   # 벽에서 떨어진 뒤
+        # 바닥/벽에 닿은 채로 멈췄을 수 있으므로: 위로 먼저 → 벽 반대쪽으로 → 홈.
+        # 닿은 상태에선 힘/모멘트가 남아 있어 감시 이동이 바로 다시 멈추므로, 짧고 느린 비감시 후퇴를 쓴다.
+        if not guard.relieve(UP_DIR, dist=APPROACH_GAP):
+            raise RuntimeError('위로 후퇴 실패')
+        if not guard.relieve(-APP_DIR, dist=APPROACH_GAP):
+            raise RuntimeError('벽 반대쪽 후퇴 실패')
         io.move_j(HOME_J)
     except ForceGuardError as e:
         io.node.get_logger().info(f'홈 복귀 중 다시 사고 감지 → 정지: {e}')
@@ -877,7 +1082,7 @@ def go_home_after_stop(io, guard, policy):
 # main
 # =============================================================================
 def main(args=None):
-    global STEP, WALL_FACE_GUESS, LAT_RANGE, Z_LIMIT, LAT_CENTER_GUESS
+    global STEP, LAT_RANGE, Z_LIMIT, LAT_CENTER_GUESS, START_DIST, MAX_DIST, FAST_UNTIL, FLOOR_Z_DEFAULT
     rclpy.init(args=args)
     DR_init.__dsr__id = ROBOT_ID
     DR_init.__dsr__model = ROBOT_MODEL
@@ -886,8 +1091,13 @@ def main(args=None):
 
     mode = node.declare_parameter('mode', 'virtual').value
     scan = node.declare_parameter('scan', 'both').value     # both|width|height|line_v|line_h|lines
-    # 벽 위치 / 탐색 범위 (real 에서 실제 벽에 맞게 지정)
-    WALL_FACE_GUESS = float(node.declare_parameter('face', WALL_FACE_GUESS).value)
+    # 탐색 방향 / 처음 벽 찾기 거리 (base 기준)
+    direction = str(node.declare_parameter('dir', DIRECTION).value)
+    START_DIST = float(node.declare_parameter('start_dist', START_DIST).value)
+    MAX_DIST = float(node.declare_parameter('max_dist', MAX_DIST).value)
+    FAST_UNTIL = float(node.declare_parameter('fast_until', FAST_UNTIL).value)
+    FLOOR_Z_DEFAULT = float(node.declare_parameter('floor_guess', FLOOR_Z_DEFAULT).value)
+    # 탐색 범위 (real 에서 실제 벽에 맞게 지정)
     LAT_RANGE = (float(node.declare_parameter('lat_min', LAT_RANGE[0]).value),
                  float(node.declare_parameter('lat_max', LAT_RANGE[1]).value))
     Z_LIMIT = float(node.declare_parameter('z_limit', Z_LIMIT).value)
@@ -918,6 +1128,24 @@ def main(args=None):
         node.get_logger().error(f'잘못된 파라미터: mode={mode}, scan={scan}')
         rclpy.shutdown()
         return
+    try:
+        configure_direction(direction)
+    except ValueError as e:
+        node.get_logger().error(str(e))
+        rclpy.shutdown()
+        return
+    if not (0.0 < START_DIST < MAX_DIST):
+        node.get_logger().error(f'0 < start_dist < max_dist 이어야 함: start_dist={START_DIST}, max_dist={MAX_DIST}')
+        rclpy.shutdown()
+        return
+    node.get_logger().info(
+        f'[설정] 탐색 방향 {DIRECTION} (벽 축 {AX_NAME[APPROACH_AXIS]}, 옆 축 {AX_NAME[LAT_AXIS]}), '
+        f'바닥 찍기 {START_DIST:.0f}mm, 최대 {MAX_DIST:.0f}mm'
+        + (f', {FAST_UNTIL:.0f}mm 까지 빠르게' if FAST_UNTIL > START_DIST else '')
+        + f', 시작 자세 J={READY_J}, TOOL_ORI={TOOL_ORI}')
+    if mode == 'virtual' and not (START_DIST + APPROACH_GAP < VIRTUAL_BOX['face'] < MAX_DIST):
+        node.get_logger().warn(f'[virtual] 가상 벽 표면({VIRTUAL_BOX["face"]:.0f}mm)이 '
+                               f'start_dist~max_dist 구간 밖 → 벽을 못 찾을 수 있음')
 
     try:
         import DSR_ROBOT2 as dsr
@@ -965,7 +1193,10 @@ def main(args=None):
         node.get_logger().info(f'[자세] 그리퍼 {TILT_DEG:.0f}° 기울임, TOOL_ORI={TOOL_ORI}')
         guard.zero()                     # 접촉 없는 정지 상태에서 관절 토크 영점
         io.guard = guard                 # 이제부터 모든 직선 이동/탐색을 감시
+        m.check_reach()
         m.detect_floor()
+        m.seek_first_wall()
+        m.check_wall_reach()
         m.check_singularity()
         if scan == 'line_v':
             m.results['line_v'] = m.run_line(m.measure_height_line, lat)

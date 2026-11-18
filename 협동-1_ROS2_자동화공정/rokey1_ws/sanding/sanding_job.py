@@ -14,8 +14,7 @@ sanding_server.py 가 이 SandingJob 으로 goal 을 실행합니다. (이 파�
   3. 그 높이에서 관절로 작업 자세로 꺾기 (도구 위, 팔이 안 닿으면 벽 쪽으로 조금씩 옮긴 곳)
      → 같은 높이로 수평 이동 → 벽 앞에서 Z 로만 내려가 접근 위치
   4. 벽 근처까지 접근 → 툴 Z(벽 쪽)로 천천히 이동하며 힘 감시 → 접촉 시 정지
-  5. 순응제어 + 힘제어 ON → 시작 위치 왕복 → (힘제어 끄고 벽에서 떨어져 다음 지점으로 → 다시 접촉 → 힘제어 ON → 왕복) 반복
-     → 종료 위치 왕복 (원 샌딩 없음)
+  5. 순응제어 + 힘제어 ON → 시작 위치 왕복 → 중간 지점 원 샌딩 → 종료 위치 왕복
      (왕복은 항상 벽면 위의 수평 방향(좌우): 진행이 Y 면 Y 로, 진행이 Z(위아래)여도 Y 로)
   6. 힘제어 OFF → 후퇴 → 수직으로 올라감 → 같은 높이로 수평 이동 → 관절로 자세 되돌리기 → 도구 반납 → 10cm 위로
 
@@ -58,9 +57,7 @@ TRANSIT_CLEAR_MM = 100.0       # (도구 들고 이동) TCP 가 도구 잡은 �
 # ── 벽 접근 / 접촉 탐색 (툴 Z = 벽 쪽 방향 거리) ────────────────────
 SURFACE_APPROACH_MM = 60.0
 PRE_CONTACT_MM = 20.0
-SEARCH_BEYOND_MM = 30.0        # 계획(관절 검사)에서 확인하는 탐색 거리 (실제 탐색은 힘이 감지될 때까지 계속)
-SEARCH_CHUNK_MM = 30.0         # 접촉 탐색: 한 번에 전진하는 거리 (힘 감지될 때까지 반복)
-SEARCH_MAX_MM = 150.0          # 접촉 탐색 안전 한계: 이만큼 전진해도 힘이 안 잡히면 중단 (벽이 없음/위치 잘못 입력)
+SEARCH_BEYOND_MM = 30.0
 SEARCH_VELX, SEARCH_ACCX = 15, 30
 CONTACT_DETECT_N = 5.0
 RETREAT_MM = 60.0
@@ -91,10 +88,11 @@ PERP_TOL_DEG = 6.0             # 샌딩 중 허용 기울기 (회전 순응으�
 SCRUB_STROKE_MM = 25.0         # 시작/종료 위치 왕복 폭 (전체 2.5cm)
 SCRUB_PASSES = 5
 SCRUB_VELX, SCRUB_ACCX = 60, 120
-FLOOR_ZONE_MM = 25.0           # 최저 높이(바닥+여유+반지름)에서 이 안의 지점은 무조건 좌우 왕복 (위아래 금지)
-HOP_OFF_MM = 10.0              # 다음 지점으로 옮길 때 벽에서 떨어지는 거리 (사포가 벽에 끌리지 않게)
-MID_STEP_MM = 30.0             # 중간 왕복 지점 간격 최대값 (시작→종료를 이 값 이하로 균등하게 나눔)
-MOVE_VELX, MOVE_ACCX = 50, 100 # 다음 지점으로 옮겨 갈 때 (벽에서 떨어진 채)
+ORBIT_RADIUS_MM = 10.0
+ORBIT_TURNS = 3
+ORBIT_POINTS_PER_TURN = 12
+ORBIT_STEP_MM = 30.0           # 원 샌딩 간격 최대값 (시작→종료를 이 값 이하로 균등하게 나눔)
+ORBIT_VELX, ORBIT_ACCX = 50, 100
 
 # ── 벽 방향 자동 판단 (surface_normal 을 안 줬을 때) ──────────────────
 SNAP_AXIS_DEG = 20.0           # 시작 자세 툴 Z 가 베이스 축과 이 각도 안이면 그 축에 정확히 90도로 맞춤
@@ -102,7 +100,7 @@ SNAP_AXIS_DEG = 20.0           # 시작 자세 툴 Z 가 베이스 축과 이 �
 # ── 도구 크기 / 바닥 여유 (원형 도구를 중앙에서 잡음) ──────────────────
 TOOL_RADIUS_MM = 45.0          # 원형 도구 반지름 (TCP = 도구 중앙 → 벽 작업 때 가장자리가 TCP 보다 이만큼 아래)
 FLOOR_CLEAR_MM = 1.0           # 도구 가장자리와 바닥 사이 여유 → 벽 맨 아래까지 갈리도록 작게 (0 이면 바닥에 닿음)
-                               # (너무 낮은 시작/종료/중간 지점만 그 높이로 올림. 벽 윗면은 검사 안 함)
+                               # (너무 낮은 시작/종료점·원 중심만 그 높이로 올림. 벽 윗면은 검사 안 함)
 
 # ── 속도 / 감시 ───────────────────────────────────────────────────
 REORIENT_VELJ, REORIENT_ACCJ = 20, 20   # 자세가 크게 바뀌는 관절 이동
@@ -322,24 +320,7 @@ class SandingJob:
             return fz, None, None
         return fz, -my / fz * 1000.0, mx / fz * 1000.0
 
-    def seek_contact(self, orient, tz, baseline, what):
-        """툴 Z(벽 쪽)로 천천히 전진하다가 힘(CONTACT_DETECT_N)이 감지되면 멈춤.
-        거리 제한 없이 SEARCH_CHUNK_MM 씩 이어서 전진 (안전 한계 SEARCH_MAX_MM). 닿으면 True"""
-        dr = self.dr
-        start = self.current()[:3]
-        moved = 0.0
-        while moved < SEARCH_MAX_MM - 1e-6:
-            step = min(SEARCH_CHUNK_MM, SEARCH_MAX_MM - moved)
-            target = sm.add(self.current()[:3], sm.scale(tz, step)) + list(orient)
-            if self.guarded(lambda t=target: dr.amovel(self.posx(t), vel=SEARCH_VELX, acc=SEARCH_ACCX, ref=dr.DR_BASE),
-                            baseline, stop_force=CONTACT_DETECT_N, what=what):
-                return True
-            moved = sm.dot(sm.sub(self.current()[:3], start), tz)
-            if moved < SEARCH_MAX_MM - 1e-6:
-                self.log.info(f"   {what}: {moved:.0f}mm 전진, 아직 힘 감지 없음 → 계속 전진")
-        return False
-
-    def align_to_wall(self, orient, baseline, tz):
+    def align_to_wall(self, orient, baseline, tz, search_end):
         """힘제어 켜기 전, 벽에 닿은 채 멈춘 상태에서 모멘트로 압력 중심을 재고 원판 전체가 닿게 자세를 맞춤.
         (힘제어 중에는 툴 힘 값이 거의 0 으로 나와 못 씀 → 위치 제어로 닿은 상태에서 잼)
         한 번: 압력 중심 측정 → 벽에서 ALIGN_BACKOFF_MM 뒤로 → 기울이기 → 다시 접촉 탐색.
@@ -380,8 +361,11 @@ class SandingJob:
             self.movel(back + list(orient), SLOW_VELX, SLOW_ACCX, f"자세 맞추기 {it}: 벽에서 {ALIGN_BACKOFF_MM:.0f}mm 뒤로")
             self.movel(back + list(new), SLOW_VELX, SLOW_ACCX, f"자세 맞추기 {it}: {ang:+.1f}도 기울이기")
             orient, prev = new, off
-            if not self.seek_contact(new, tz, baseline, f"자세 맞추기 {it}: 다시 접촉"):
-                raise Abort(f"자세 맞추기 중 {SEARCH_MAX_MM:.0f}mm 전진해도 벽에 닿지 않았습니다.")
+            hit = self.guarded(lambda o=list(new): dr.amovel(self.posx(list(search_end) + o), vel=SEARCH_VELX,
+                                                            acc=SEARCH_ACCX, ref=dr.DR_BASE),
+                               baseline, stop_force=CONTACT_DETECT_N, what=f"자세 맞추기 {it}: 다시 접촉")
+            if not hit:
+                raise Abort("자세 맞추기 중 다시 벽에 닿지 않았습니다.")
         else:
             self.log.warn(f"   자세 맞추기: {ALIGN_MAX_ITERS}번 해도 {ALIGN_DONE_MM}mm 안으로 안 들어옴 - 지금 자세로 진행")
         return orient
@@ -609,34 +593,23 @@ class SandingJob:
         #   시작/종료: 왕복이 아래로 내려가는 만큼만 / 중간 원: 원이 아래로 내려가는 만큼만
         if self.floor_z is None:
             self.log.warn("바닥 높이(floor_z) 미설정 - 도구 바닥 여유 검사를 건너뜁니다.")
-        # 바닥 근처 지점은 무조건 좌우(수평) 왕복 → 아래로 내려가는 동작이 없으니 최저 높이 = 바닥 + 여유 + 반지름
-        end_min = self.floor_min_z(tz, 0.0)
+        end_min = self.floor_min_z(tz, half * abs(sd[2]))
         s, e = self.keep_floor_clear([s, e], end_min, ["시작", "종료"])
         u, v, length = sm.path_frame(s, e, tz, tx)   # 점을 올렸으면 진행 방향/길이 다시 계산
         sd = self.scrub_dir(u, v)
-        centers = sm.orbit_centers(s, e, u, length, MID_STEP_MM)   # 시작, 중간 지점들, 종료 (균등 간격)
+        end_min = self.floor_min_z(tz, half * abs(sd[2]))
+        orbit_min = self.floor_min_z(tz, ORBIT_RADIUS_MM * math.hypot(u[2], v[2]))
+        centers = sm.orbit_centers(s, e, u, length, ORBIT_STEP_MM)
         if len(centers) > 2:
             centers = [centers[0]] + self.keep_floor_clear(
-                centers[1:-1], end_min, [f"중간 {k}" for k in range(1, len(centers) - 1)]) + [centers[-1]]
+                centers[1:-1], orbit_min, [f"원 {k} 중심" for k in range(1, len(centers) - 1)]) + [centers[-1]]
         if end_min is not None:
-            self.log.info(f"바닥 여유: TCP 최소 z {end_min:.1f} "
+            self.log.info(f"바닥 여유: TCP 최소 z 시작/종료 {end_min:.1f} · 원 {orbit_min:.1f} "
                           f"(바닥 {self.floor_z:.1f} + 여유 {self.floor_clear:.1f} + 도구 반지름 {self.tool_radius:.1f} "
                           f"→ 도구 아래끝이 바닥 위 {self.floor_clear:.1f}mm 까지)")
-        # 지점별 왕복 방향: 바닥 근처(최저 높이 + FLOOR_ZONE_MM 이하)는 무조건 벽면 위 수평(좌우), 나머지는 sd
-        horiz = None
-        if abs(tz[2]) < 0.7:   # 벽 작업일 때만 (바닥 작업은 원래 수평)
-            horiz = sm.unit(sm.cross([0.0, 0.0, 1.0], tz))
-            if sm.dot(horiz, sd) < 0:
-                horiz = sm.scale(horiz, -1.0)
-        sds = []
-        for c in centers:
-            near_floor = end_min is not None and c[2] <= end_min + FLOOR_ZONE_MM
-            sds.append(horiz if (near_floor and horiz is not None) else sd)
-        sns = ["위아래" if abs(d[2]) > 0.7 else "좌우" for d in sds]
-        sn = sns[0]
-        names = ["시작"] + [f"중간 {k}" for k in range(1, len(centers) - 1)] + ["종료"]
-        self.log.info(f"작업: 시작 {fmt(s)} → 종료 {fmt(e)} ({length:.0f}mm, 진행 {fmt(u, 2)}), 왕복 ±{half:.1f}mm: "
-                      + ", ".join(f"{n} z={c[2]:.0f} {d}" for n, c, d in zip(names, centers, sns)))
+        sn = "위아래" if abs(sd[2]) > 0.7 else "좌우"
+        self.log.info(f"작업: 시작 {fmt(s)} → 종료 {fmt(e)} ({length:.0f}mm, 진행 {fmt(u, 2)}), "
+                      f"시작/종료 {sn} 왕복 ±{half:.1f}mm")
 
         # 이동 경로: 도구 들고 수직 상승(z=transit_z) → 그 높이에서 관절로 작업 자세 꺾기
         #   → 같은 높이로 수평 이동(벽 쪽) → 벽 앞에서 Z 로만 수직 하강 → 벽 쪽 접근.  돌아올 때는 반대 순서
@@ -648,7 +621,7 @@ class SandingJob:
         approach_high = [approach[0], approach[1], transit_z]
         retreat = sm.sub(e, sm.scale(tz, RETREAT_MM))
         retreat_high = [retreat[0], retreat[1], transit_z]
-        geo = dict(orient=orient, tz=tz, u=u, v=v, s=s, e=e, centers=centers, half=half, sn=sn, sd=sd, sds=sds, sns=sns,
+        geo = dict(orient=orient, tz=tz, u=u, v=v, s=s, e=e, centers=centers, half=half, sn=sn, sd=sd,
                    high=high, approach_high=approach_high, approach=approach,
                    pre=sm.sub(s, sm.scale(tz, PRE_CONTACT_MM)),
                    search_end=sm.add(s, sm.scale(tz, SEARCH_BEYOND_MM)), retreat_high=retreat_high)
@@ -684,12 +657,16 @@ class SandingJob:
         work = sample_line(P(approach_high), P(approach), PATH_STEP_MM)                    # 수직 하강
         work += sample_line(work[-1], P(geo["search_end"]), PATH_STEP_MM)[1:]
         for i, c in enumerate(centers):
-            if i > 0:   # 다음 지점: 벽에서 떨어짐 → 떨어진 채 이동 → 다시 벽 쪽으로
-                work += sample_line(work[-1], P(sm.sub(work[-1][:3], sm.scale(tz, HOP_OFF_MM))), PATH_STEP_MM)[1:]
-                work += sample_line(work[-1], P(sm.sub(c, sm.scale(tz, HOP_OFF_MM))), PATH_STEP_MM)[1:]
             work += sample_line(work[-1], P(c), PATH_STEP_MM)[1:]
-            for d in (half, -half, 0.0):   # 모든 지점에서 왕복 (바닥 근처는 좌우)
-                work += sample_line(work[-1], P(sm.add(c, sm.scale(sds[i], d))), PATH_STEP_MM)[1:]
+            if i in (0, len(centers) - 1):
+                for d in (half, -half, 0.0):
+                    work += sample_line(work[-1], P(sm.add(c, sm.scale(sd, d))), PATH_STEP_MM)[1:]
+            else:
+                for k in range(8):
+                    a = 2 * math.pi * k / 8
+                    work.append(P(sm.add(c, sm.add(sm.scale(u, ORBIT_RADIUS_MM * math.cos(a)),
+                                                   sm.scale(v, ORBIT_RADIUS_MM * math.sin(a))))))
+                work.append(P(c))
         work += sample_line(work[-1], P(retreat), PATH_STEP_MM)[1:]
         work += sample_line(work[-1], P(retreat_high), PATH_STEP_MM)[1:]                   # 수직 상승
         # 팔 형태(sol): 시작 관절각을 주면 그 자세와 가장 가까운 것 (교시한 팔 형태),
@@ -734,12 +711,16 @@ class SandingJob:
         self.ensure_tcp()
         geo = self.plan(tool, start_posx, end_posx, normal, start_posj, work_vector)
         orient, tz, u, v, half, sn = geo["orient"], geo["tz"], geo["u"], geo["v"], geo["half"], geo["sn"]
+        sd = geo["sd"]
 
         def pose(p):
             return list(p) + list(orient)
 
         def amovel(p, vel, acc):
             return lambda: dr.amovel(self.posx(pose(p)), vel=vel, acc=acc, ref=dr.DR_BASE)
+
+        def amovesx(pts, vel, acc):
+            return lambda: dr.amovesx([self.posx(pose(p)) for p in pts], vel=vel, acc=acc, ref=dr.DR_BASE)
 
         # 2. (필요하면 홈 자세) → 도구 집기 → 20cm 들기
         if geo["go_home"]:
@@ -772,13 +753,15 @@ class SandingJob:
         err = None
         try:
             # 4. 접촉 탐색
-            self.step(f"접촉 탐색: 툴 Z(벽 쪽)로 {SEARCH_VELX}mm/s, 힘 감지될 때까지 전진", phase=4)
+            self.step(f"접촉 탐색: 툴 Z(벽 쪽)로 {SEARCH_VELX}mm/s", phase=4)
             time.sleep(0.3)
             baseline = self.force_avg()
-            if not self.seek_contact(orient, tz, baseline, "접촉 탐색"):
-                raise Abort(f"벽 쪽으로 {SEARCH_MAX_MM:.0f}mm 전진해도 힘이 감지되지 않았습니다 (벽 위치/시작 위치 확인).")
+            hit = self.guarded(amovel(geo["search_end"], SEARCH_VELX, SEARCH_ACCX), baseline,
+                               stop_force=CONTACT_DETECT_N, what="접촉 탐색")
+            if not hit:
+                raise Abort(f"시작 위치보다 {SEARCH_BEYOND_MM:.0f}mm 더 들어가도 벽에 닿지 않았습니다.")
             self.step("자세 맞추기: 원판 전체가 벽에 닿게 (모멘트로 덜 닿는 쪽 판단)")
-            orient = self.align_to_wall(orient, baseline, tz)   # 이후 샌딩 동작은 맞춘 자세로
+            orient = self.align_to_wall(orient, baseline, tz, geo["search_end"])   # 이후 샌딩 동작은 맞춘 자세로
             contact = self.current()[:3]
             self.log.info(f"   벽 접촉 위치: {fmt(contact)} (시작 위치 대비 툴Z {sm.dot(sm.sub(contact, geo['s']), tz):+.1f}mm)")
 
@@ -792,42 +775,25 @@ class SandingJob:
             def line(p, vel, acc, what):
                 return self.guarded(amovel(p, vel, acc), target=pose(p), what=what, **g)
 
-            sds, sns = geo["sds"], geo["sns"]
-
-            def hop_to(k, name):
-                """힘제어 끄고 벽에서 HOP_OFF_MM 떨어짐 → 떨어진 채 다음 지점 앞으로 → 다시 접촉 탐색 → 힘제어 켬"""
-                nonlocal baseline
-                self.force_off()
-                here = self.current()[:3]
-                self.movel(sm.sub(here, sm.scale(tz, HOP_OFF_MM)) + list(orient), SLOW_VELX, SLOW_ACCX,
-                           f"{name}: 벽에서 {HOP_OFF_MM:.0f}mm 떨어지기")
-                self.movel(sm.sub(centers[k], sm.scale(tz, HOP_OFF_MM)) + list(orient), MOVE_VELX, MOVE_ACCX,
-                           f"{name}: 떨어진 채로 이동")
-                time.sleep(0.3)
-                baseline = self.force_avg()   # 벽에서 떨어진 상태 기준값 다시 잼
-                g["baseline"] = baseline
-                if not self.seek_contact(orient, tz, baseline, f"{name}: 다시 벽에 붙기"):
-                    raise Abort(f"{name}: {SEARCH_MAX_MM:.0f}mm 전진해도 벽에 닿지 않았습니다.")
-                centers[k] = self.current()[:3]   # 실제 닿은 곳을 이 지점의 중심으로
-                g["plane"] = (centers[k], tz)
-                self.force_on()
-
-            def scrub(k, name):
-                p, d, dn = centers[k], sds[k], sns[k]
+            def scrub(p, name):
                 for i in range(1, SCRUB_PASSES + 1):
-                    self.step(f"{name} {dn} 샌딩 {i}/{SCRUB_PASSES} (±{half:.1f}mm)")
-                    line(sm.add(p, sm.scale(d, half)), SCRUB_VELX, SCRUB_ACCX, f"{name} {dn}(+)")
-                    line(sm.sub(p, sm.scale(d, half)), SCRUB_VELX, SCRUB_ACCX, f"{name} {dn}(-)")
+                    self.step(f"{name} {sn} 샌딩 {i}/{SCRUB_PASSES} (±{half:.1f}mm)")
+                    line(sm.add(p, sm.scale(sd, half)), SCRUB_VELX, SCRUB_ACCX, f"{name} {sn}(+)")
+                    line(sm.sub(p, sm.scale(sd, half)), SCRUB_VELX, SCRUB_ACCX, f"{name} {sn}(-)")
                 line(p, SCRUB_VELX, SCRUB_ACCX, f"{name} 가운데")
 
-            scrub(0, "시작 위치")
-            n_mid = len(centers) - 2
-            for k in range(1, len(centers)):
-                name = (f"중간 {k}/{n_mid} ({sm.dot(sm.sub(centers[k], centers[0]), u):.0f}mm 지점)"
-                        if k < len(centers) - 1 else "종료 위치")
-                self.step(f"{name}로 이동 (벽에서 {HOP_OFF_MM:.0f}mm 떨어져서 → 다시 붙기)")
-                hop_to(k, name)
-                scrub(k, name)
+            scrub(centers[0], "시작 위치")
+            middle = centers[1:-1]
+            for i, c in enumerate(middle, start=1):
+                self.step(f"원 샌딩 {i}/{len(middle)} ({sm.dot(sm.sub(c, centers[0]), u):.0f}mm 지점, "
+                          f"{ORBIT_TURNS}바퀴)")
+                line(c, ORBIT_VELX, ORBIT_ACCX, f"원 {i} 중심")
+                line(sm.add(c, sm.scale(u, ORBIT_RADIUS_MM)), ORBIT_VELX, ORBIT_ACCX, f"원 {i} 시작점")
+                pts = sm.orbit_points(c, u, v, ORBIT_RADIUS_MM, ORBIT_TURNS, ORBIT_POINTS_PER_TURN)
+                self.guarded(amovesx(pts, ORBIT_VELX, ORBIT_ACCX), target=pose(pts[-1]), what=f"원 {i} 샌딩", **g)
+            self.step("종료 위치로 이동")
+            line(centers[-1], ORBIT_VELX, ORBIT_ACCX, "종료 위치")
+            scrub(centers[-1], "종료 위치")
 
         except BaseException as ex:
             err = ex

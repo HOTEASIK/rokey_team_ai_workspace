@@ -5,14 +5,6 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#242629" />
     <title>M0609 · ROKEY1 통합 제어</title>
-    <script>
-      /* 저장된 테마가 없으면 화이트(light)가 기본. 다크를 기본으로 하려면 'light' → 'dark' */
-      (function () {
-        var t = 'light';
-        try { t = localStorage.getItem('theme') || t; } catch (e) {}
-        document.documentElement.setAttribute('data-theme', t);
-      })();
-    </script>
     <link rel="stylesheet" href="styles.css" />
     <link rel="stylesheet" href="hmi.css" />
   </head>
@@ -30,7 +22,7 @@
           <button class="page-tab" data-page="monitor" title="TCP 작업 공간 + 실시간 로그 (단축키 2)">실시간 작업 현황<span class="page-badge" id="monitorBadge" hidden></span></button>
         </nav>
         <div class="topbar-actions">
-          <button class="theme-toggle" id="themeToggle" type="button" title="화이트 / 다크 모드 전환">◐ <span id="themeLabel">다크</span></button>
+          <div class="ui-mode-toggle" title="간편 = 작업 실행만 · 전문가 = 전체 정보"><button data-uimode="simple">간편</button><button data-uimode="expert">전문가</button></div>
           <div class="bridge-chip" id="bridgeChip"><span class="pulse-dot"></span><span id="bridgeText">연결 중…</span></div>
           <div class="top-clock"><span id="topClock">--:--:--</span><small id="topDate"></small></div>
         </div>
@@ -81,7 +73,8 @@
           <section class="module control-module">
             <div class="module-head"><span>작업 실행</span><span class="hot-tag" id="armedTag">준비</span></div>
             <div class="task-tabs" id="groupTabs">
-              <button class="task-tab active" data-group="navigation">벽면 탐색</button>
+              <button class="task-tab active" data-group="process">공정</button>
+              <button class="task-tab" data-group="navigation">벽면 탐색</button>
               <button class="task-tab" data-group="putty">퍼티</button>
               <button class="task-tab" data-group="sanding">샌딩</button>
             </div>
@@ -215,25 +208,6 @@
     </div>
     <div class="toast" id="toast" hidden></div>
     <div class="alert-stack" id="alertStack" aria-live="assertive"><div id="alertList"></div><button class="alert-clear" id="alertClear" hidden>경고 팝업 모두 닫기</button></div>
-    <script>
-      (function () {
-        var root = document.documentElement;
-        var btn = document.getElementById('themeToggle');
-        var label = document.getElementById('themeLabel');
-        var meta = document.querySelector('meta[name="theme-color"]');
-        function apply(t) {
-          root.setAttribute('data-theme', t);
-          label.textContent = t === 'light' ? '다크' : '화이트';   /* 눌렀을 때 바뀔 모드 */
-          if (meta) meta.setAttribute('content', t === 'light' ? '#f3f5f7' : '#242629');
-        }
-        apply(root.getAttribute('data-theme') || 'light');
-        btn.addEventListener('click', function () {
-          var next = root.getAttribute('data-theme') === 'light' ? 'dark' : 'light';
-          apply(next);
-          try { localStorage.setItem('theme', next); } catch (e) {}
-        });
-      })();
-    </script>
     <script type="module" src="main.js"></script>
   </body>
 </html>
