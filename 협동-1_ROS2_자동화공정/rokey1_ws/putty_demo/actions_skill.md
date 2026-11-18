@@ -47,7 +47,7 @@ flowchart TD
     H[HMI 또는 putty_task_client] -->|PuttyTask Action| S[putty_task_server]
     M[팀 manager] -->|Process Action| S
     S --> V[action_protocol: 요청 검증]
-    V --> W[action_process / action_worker: 작업 프로세스 실행]
+    V --> W[utils/worker_process / action_worker: 작업 프로세스 실행]
     W --> N[initialize / pickup / scoop / apply / return]
     N -->|dsr_msgs2 Service| D[dsr_controller2]
     D --> R[M0609]
@@ -72,7 +72,7 @@ flowchart TD
 | 1 | [putty_task_client.py](putty_task_client.py) | 작업명·옵션으로 Goal을 만들고 결과를 기다리는 부분 |
 | 2 | [putty_task_server.py](putty_task_server.py) | Goal 접수, 동시 실행 차단, 피드백, 취소·정리 |
 | 3 | [action_protocol.py](action_protocol.py) | 허용 옵션, 모드와 입력 검증, 공통 Process 변환 |
-| 4 | [action_worker.py](action_worker.py) / [action_process.py](action_process.py) | 작업 파일 선택, 로그 수집, 프로세스 중단 |
+| 4 | [action_worker.py](action_worker.py) / [utils/worker_process.py](../utils/worker_process.py) | 작업 파일 선택, 로그 수집, 프로세스 중단 |
 | 5 | [apply_putty_plane.py](apply_putty_plane.py) | 도포 설정, 접촉점·각도에서 TCP 경로 계산 |
 | 6 | [putty_motion.py](putty_motion.py) | ROS 이동 요청, 응답·도착 검사, 힘 유지와 로그 |
 | 7 | [contact_search.py](contact_search.py) | 접촉 감지, 순응제어 시작/해제, 힘 안정 판정 |

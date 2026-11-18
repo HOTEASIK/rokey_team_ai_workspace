@@ -202,7 +202,7 @@ def test_hmi_putty_tasks_use_actions_and_sanding_is_preserved():
 
 def test_worker_can_be_interrupted_while_its_operation_is_still_running():
     """ROS/로봇 없이 실제 자식 프로세스의 SIGSTOP→SIGINT 종료를 확인한다."""
-    from putty_demo.action_process import WorkerProcess
+    from utils.worker_process import WorkerProcess
     script = ('import signal,time,sys; '
               'signal.signal(signal.SIGINT, lambda *a: sys.exit(130)); '
               'print("ready", flush=True); time.sleep(60)')

@@ -14,9 +14,9 @@ import time
 
 
 # ===== 설정 / 하이퍼파라미터 =====
-HOME_J = (0.0, 0.0, 90.0, 0.0, 90.0, 0.0)
+from utils.robot import HOME_J, ROBOT_ID, TCP_NAME  # config/robot.yaml robot 섹션
 HOME_TOLERANCE_DEG = 0.5
-EXPECTED_TCP = 'GripperDA_v1'
+EXPECTED_TCP = TCP_NAME
 # 집기 TCP의 측정 BASE XYZABC. 단위는 mm, degree.
 PICK_POSE = (308.42, 120.70, 152.43, 18.32, 178.35, 17.14)
 PICK_POSITION = PICK_POSE[:3]
@@ -33,7 +33,6 @@ OPEN = ((1, 0), (2, 0), (2, 1))
 CLOSE = ((1, 0), (2, 0), (1, 1), (2, 0))
 
 # ===== 로봇 초기화 설정 =====
-ROBOT_ID = 'dsr01'
 
 
 # ===== 메인 =====

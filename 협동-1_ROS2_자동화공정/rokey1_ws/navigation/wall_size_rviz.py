@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""wall_size.py 의 '탐색 경로 / 측정 결과' 를 RViz2 MarkerArray 로 보여주는 모듈.
+"""wall_tap.py 의 '탐색 경로 / 측정 결과' 를 RViz2 MarkerArray 로 보여주는 모듈.
 
 [보이는 것]  (ns 별로 RViz 에서 켜고 끌 수 있음)
   path      : TCP 가 지나간 경로 (선)
@@ -13,15 +13,11 @@
   truth     : (virtual) 가상 벽 정답 (빨간 테두리)
   tool      : 현재 그리퍼 (45° 기울어진 막대 + 손가락 끝 점)
 
-[사용]
-  1) 탐색 중 실시간:  wall_size 가 자동으로 /dsr01/wall_size_markers 로 퍼블리시
-  2) 저장된 결과 다시 보기 (로봇 불필요):
-       ros2 run rokey1 wall_size_rviz                         # 가장 최근 size_*.json
-       ros2 run rokey1 wall_size_rviz ~/wall_scan_data/size_20261113_170000.json
+[사용]  wall_tap 이 탐색 중 /dsr01/wall_size_markers 로 퍼블리시 (rviz:=true)
 
 [RViz]  Fixed Frame = base_link,  Add → By topic → /dsr01/wall_size_markers (MarkerArray)
 
-[scene 형식]  (wall_size.WallSizeMeasurer.scene() 가 만들고 JSON 의 'scene' 에도 저장됨)
+[scene 형식]  (wall_tap.WallTapper.scene() 가 만듦)
   axes      : {'lat','approach','approach_sign','up'}  축 번호
   path      : [[x, y, z, phase], ...]   phase = 'move' | 'seek' | 'follow'
   points    : [{'kind': 'probe'|'scan_h'|'scan_v'|'floor', 'xyz': [...]}, ...]
@@ -31,10 +27,6 @@
   truth     : 가상 벽 설정 또는 None
   좌표 단위는 mm, RViz 는 m → 내부에서 /1000 변환.
 """
-import glob
-import json
-import os
-import sys
 import threading
 import time
 
@@ -279,51 +271,3 @@ class WallSizeViz:
         c = self._Color()
         c.r, c.g, c.b, c.a = (float(v) for v in rgba)
         return c
-
-
-# =============================================================================
-# 저장된 결과 다시 보기
-# =============================================================================
-def latest_file(save_dir=os.path.expanduser('~/wall_scan_data')):
-    files = sorted(glob.glob(os.path.join(save_dir, 'size_*.json')))
-    return files[-1] if files else None
-
-
-def main(args=None):
-    import rclpy
-    from rclpy.utilities import remove_ros_args
-    rclpy.init(args=args)
-    argv = remove_ros_args(sys.argv)[1:]
-    path = os.path.expanduser(argv[0]) if argv else latest_file()
-    node = rclpy.create_node('wall_size_rviz', namespace='dsr01')
-    if not path or not os.path.exists(path):
-        node.get_logger().error('size_*.json 파일이 없습니다 (먼저 wall_size 실행)')
-        rclpy.shutdown()
-        return
-    with open(path) as f:
-        data = json.load(f)
-    scene = data.get('scene')
-    if scene is None:
-        node.get_logger().error(f'{path} 에 scene 데이터가 없습니다 (예전 형식)')
-        rclpy.shutdown()
-        return
-    scene['tool'] = None
-    viz = WallSizeViz(node, frame_id=node.declare_parameter('frame_id', 'base_link').value)
-    viz.clear()
-    viz.publish(scene, force=True)
-    node.create_timer(1.0, lambda: viz.publish(scene, force=True))
-    s = scene.get('summary') or {}
-    node.get_logger().info(f'표시 중: {path}  (경로 {len(scene["path"])}점, 측정선 {len(scene["lines"])}개, '
-                           f'H={s.get("total_height")}, W={s.get("total_width")})  Ctrl+C 로 종료')
-    try:
-        rclpy.spin(node)
-    except KeyboardInterrupt:
-        pass
-    finally:
-        node.destroy_node()
-        if rclpy.ok():
-            rclpy.shutdown()
-
-
-if __name__ == '__main__':
-    main()

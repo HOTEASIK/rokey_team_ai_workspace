@@ -261,6 +261,10 @@ class TaskManager:
                 if motion and r.motion:
                     raise RuntimeError(f'로봇 동작 작업이 이미 실행 중입니다: {r.task["label"]} (실행 #{r.id}). '
                                        '먼저 정지하세요.')
+                if task['kind'] == 'db' and r.task.get('mode_bound') and r.mode != mode:
+                    # 액션 서버는 켤 때의 모드로 동작 → 공정 모드와 다르면 DB 의 run.mode 가 실제와 어긋남
+                    raise RuntimeError(f'{r.task["label"]} 이(가) {r.mode} 모드로 실행 중입니다 (실행 #{r.id}). '
+                                       f'화면 모드({mode})와 맞추거나 서버를 정지 후 다시 시작하세요.')
             run = Run(task, mode, params, motion)
             self.runs.append(run)
             self.runs = self.runs[-40:]

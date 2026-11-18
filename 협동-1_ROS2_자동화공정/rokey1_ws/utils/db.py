@@ -95,10 +95,15 @@ class DB:
                     (datetime.now(), result, data_check, run_id))
 
     def gap_points(self, gap_id):
-        """[sx,sy,sz, ex,ey,ez] 또는 None (없는 gap_id)."""
-        row = self._exec("SELECT start_x, start_y, start_z, end_x, end_y, end_z FROM gap"
-                         " WHERE gap_id=%s", (gap_id,), fetch=True)
-        return [float(v) for v in row] if row else None
+        """([sx,sy,sz, ex,ey,ez], 벽 4점 12개) 또는 None (없는 gap_id)."""
+        row = self._exec("SELECT g.start_x, g.start_y, g.start_z, g.end_x, g.end_y, g.end_z,"
+                         " w.top_x, w.top_y, w.top_z, w.floor_x, w.floor_y, w.floor_z,"
+                         " w.right_x, w.right_y, w.right_z, w.left_x, w.left_y, w.left_z"
+                         " FROM gap g JOIN wall w ON w.wall_id=g.wall_id WHERE g.gap_id=%s", (gap_id,), fetch=True)
+        if not row:
+            return None
+        row = [float(v) for v in row]
+        return row[:6], row[6:]
 
     def check_run(self, run_id, task):
         """필수 데이터가 들어갔는지만 확인. 'OK' 또는 빠진 항목."""

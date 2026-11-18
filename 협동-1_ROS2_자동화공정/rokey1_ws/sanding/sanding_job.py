@@ -38,14 +38,12 @@ from onrobot_rg_msgs.srv import SetCommand
 from sanding import surface_math as sm
 from sanding.reach_check import ReachChecker, ReachError, fmt, sample_joint, sample_line, vec6
 
-ROBOT_ID = "dsr01"
-ROBOT_MODEL = "m0609"
+from utils.robot import ROBOT_ID, ROBOT_MODEL, TOOL_NAME  # config/robot.yaml robot 섹션
 DR_init.__dsr__id = ROBOT_ID
 DR_init.__dsr__model = ROBOT_MODEL
 
 # ── 도구 들기 ─────────────────────────────────────────────────────
 HOME_POSJ = [0.0, 0.0, 90.0, 0.0, 90.0, 0.0]   # 현재 팔 형태로 도구에 못 가면 여기로 먼저 이동
-TOOL_NAME = "Tool Weight"      # 티칭 펜던트에 등록된 Tool (있으면 선택, 없으면 건너뜀)
 TCP_NAMES = ("GripperDA_v1", "GripperDA v1")   # 티칭 펜던트에 등록된 TCP 이름 후보 (도구/작업 위치는 이 TCP 기준으로 교시)
 APPROACH_Z = 100.0             # 도구 위 접근 높이
 LIFT_Z = 100.0                 # 도구 들어올리기 (천천히)

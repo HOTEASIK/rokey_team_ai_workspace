@@ -27,7 +27,7 @@ from dsr_msgs2.srv import (
 )
 from rokey_interfaces.action import PuttyTask, Process
 
-from .action_process import WorkerProcess
+from utils.worker_process import WorkerProcess
 from .action_protocol import worker_command, process_putty_goal, process_error_code
 from .pickup_spatula import ROBOT_ID
 

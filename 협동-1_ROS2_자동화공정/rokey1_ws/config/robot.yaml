@@ -9,12 +9,12 @@ db:
   password: cobot
   database: cobot
 
-common:
-  vel: 60
-  acc: 60
-
-poses:                 # 이름: {type: joint | task, value: [...]}
-  standby: {type: joint, value: [0, 0, 90, 0, 90, 0]}
+robot:                 # 모든 노드 공통 (utils/robot.py 로 읽음)
+  id: dsr01            # bringup 의 name 과 같아야 함
+  model: m0609
+  tool: Tool Weight    # 티칭 펜던트에 등록된 Tool 이름
+  tcp: GripperDA_v1    # 티칭 펜던트에 등록된 TCP 이름
+  home_j: [0.0, 0.0, 90.0, 0.0, 90.0, 0.0]
 
 force:                 # 대분류_소분류: 힘제어 파라미터
   putty_scrape:        # /process/putty 벽 도포 (BASE +X 단일 축 힘, putty_demo/action_protocol.py)
@@ -47,6 +47,9 @@ force:                 # 대분류_소분류: 힘제어 파라미터
     lift_speed: null
     acceleration: null
 
+  sanding:             # /process/sanding (sanding/sanding_server.py). 실측 후 조정. ROS 파라미터 -p press_force 가 있으면 그게 우선
+    press_force: 13.0  # 벽을 누르는 힘 N (3~30). 작업마다 task_log.params 에 기록됨
+
 putty_load_line:       # 판 묻히기 직선 (TCP XYZ, 날 접촉 시). end = start 에서 X+30~40 (load_putty.CONTACT_POSE 기준)
   start: [-431.88, -1.52, 123.68]
   end:   [-396.88, -1.52, 123.68]
@@ -55,3 +58,24 @@ util:
   singularity: {mode: avoid, retry: 1}
   camera_up:   {z_threshold: 150}
 
+
+wall_tap:              # navigation/wall_tap.py 기본값 덮어쓰기 (실측 셋업 기준). ROS 파라미터(-p)가 있으면 그게 우선
+  direction: '+x'      # 벽 방향
+  tilt: 45.0           # 그리퍼 기울기 [deg]
+  start: [700.0, 0.0, 100.0]   # 시작 위치 BASE [x, y, z] (벽 앞, 바닥 위)
+  force: 10.0          # 힘 제어 지령 [N]
+  contact: 3.0         # 접촉 진입 임계값 하한 [N]
+  k_sigma: 5.0         # 진입 임계값 = max(contact, k_sigma × 노이즈 σ)
+  hyst: 0.6
+  step_z: 30.0         # 높이 측정 간격 [mm]
+  step_y: 30.0         # 너비 측정 간격 [mm]
+  tol: 1.0             # 이분탐색 종료 구간 [mm]
+  z_limit: 450.0       # 높이 측정 상한 (BASE z)
+  lat_range: [-320.0, 320.0]   # 너비 측정 옆 한계 (BASE)
+  width_ref_j_left:  [0.0, 24.63, 127.20, -1.28, -60.84, 90.57]   # 실측 (2026-11-17)
+  width_ref_j_right: [0.0, 27.46, 127.68, 176.69, 64.48, 91.43]
+  width_roll_left: 90.0
+
+explore:               # /process/explore (navigation/explore_server.py)
+  timeout_sec: 900     # wall_tap 1회 최대 시간
+  gaps: []             # 틈 좌표 [[sx,sy,sz, ex,ey,ez], ...] (BASE mm). 틈 자동 감지 전까지 손으로 넣음

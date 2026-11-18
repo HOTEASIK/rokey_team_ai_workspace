@@ -31,40 +31,16 @@ def _ros_params(**kw):
     return ['--ros-args', *out] if out else []
 
 
-def _p(key, label, type_, default, options=None, help_='', scale=False):
-    """scale=True 이면 HMI 속도가 100% 를 넘을 때(안전 해제) 그 배율만큼 값을 키운다."""
-    item = {'key': key, 'label': label, 'type': type_, 'default': default, 'help': help_, 'scale': scale}
+def _p(key, label, type_, default, options=None, help_='', scale=False,
+       min_=None, max_=None, integer=False, maxlen=None, remember=True):
+    """scale=True 이면 HMI 속도가 100% 를 넘을 때(안전 해제) 그 배율만큼 값을 키운다.
+    min_/max_ (포함), integer: 숫자 칸 범위/정수. maxlen: 텍스트 최대 글자 수.
+    remember=False: 브라우저에 지난 입력값을 남기지 않음 (매번 새로 입력)."""
+    item = {'key': key, 'label': label, 'type': type_, 'default': default, 'help': help_, 'scale': scale,
+            'min': min_, 'max': max_, 'integer': integer, 'maxlen': maxlen, 'remember': remember}
     if options is not None:
         item['options'] = list(options)
     return item
-
-
-# ----------------------------------------------------------------------------- navigation
-def _wall_size(mode, p):
-    # 화면에 없는 값(사고 주입, 높이 측정 위치 등)은 노드 기본값을 쓴다 (RViz 마커는 항상 켬)
-    return [_run('wall_size', *_ros_params(
-        mode=mode, scan=p['scan'], dir=p['dir'], start_dist=p['start_dist'], max_dist=p['max_dist'],
-        fast_until=p['fast_until'], floor_guess=p['floor_guess'], center=p['center'],
-        lat_min=p['lat_min'], lat_max=p['lat_max'], z_limit=p['z_limit'],
-        zs=p['zs'], step=p['step']))]
-
-
-def _wall_navigation(mode, p):
-    return [_run('wall_navigation', *_ros_params(
-        mode=mode, modeling=p['modeling'], show_plot=p['show_plot'], rviz=p['rviz']))]
-
-
-def _table_navigation(mode, p):
-    return [_run('table_navigation', *_ros_params(
-        task=p['task'], mode=mode, area=p['area'], table_z=p['table_z'], speed=p['speed'],
-        dry_run=p['dry_run'], go_home=p['go_home'], show_plot=p['show_plot'], rviz=p['rviz']))]
-
-
-def _wall_modeling(mode, p):
-    args = ['--no-show'] if not p['show_plot'] else []
-    if p['rviz']:
-        args.append('--rviz')
-    return [_run('wall_modeling', *args)]
 
 
 # ----------------------------------------------------------------------------- putty_demo
@@ -79,13 +55,13 @@ def _pickup_args(mode, p):
 
 
 PICKUP_PARAMS = [
-    _p('clearance', '접근 거리 (mm)', 'number', 50.0,
+    _p('clearance', '접근 거리 (mm)', 'number', 50.0, min_=1.0, max_=200.0,
        help_='헤라 바로 위에서 멈추는 높이. 클수록 안전하지만 시간이 더 걸림'),
-    _p('settle', '집게 대기 (s)', 'number', 1.0,
+    _p('settle', '집게 대기 (s)', 'number', 1.0, min_=0.0, max_=10.0,
        help_='RG2 를 닫은 뒤 다음 동작까지 기다리는 시간'),
-    _p('transfer_speed', '이송 속도 (mm/s)', 'number', 15.0, scale=True,
+    _p('transfer_speed', '이송 속도 (mm/s)', 'number', 15.0, scale=True, min_=1.0, max_=100.0,
        help_='헤라 위까지 크게 이동할 때 속도 (속도 % 가 100 을 넘으면 비례 증가)'),
-    _p('pick_speed', '집기 속도 (mm/s)', 'number', 5.0, scale=True,
+    _p('pick_speed', '집기 속도 (mm/s)', 'number', 5.0, scale=True, min_=1.0, max_=50.0,
        help_='집기 높이로 내려가고 들어 올릴 때 속도 (느릴수록 정확)'),
 ]
 
@@ -104,10 +80,10 @@ def _homeset(mode, p):
 DB_PARAMS = [
     _p('purpose', '목적', 'select', 'TEST', ['TEST', 'EXPERIMENT', 'DEMO']),
     _p('material', '재료', 'select', 'clay', ['clay', 'putty']),
-    _p('note', '메모', 'text', ''),
+    _p('note', '메모', 'text', '', maxlen=200, help_='DB run.note (200자 이하)'),
 ]
-GAP_PARAM = _p('gap_id', '틈 번호 (gap_id)', 'number', 1,
-               help_='DB gap 테이블의 번호. 탐색(EXPLORE/전체 공정) 로그에 찍힌 gap_id 를 넣는다')
+GAP_PARAM = _p('gap_id', '틈 번호 (gap_id)', 'number', '', min_=1, integer=True, remember=False,
+               help_='DB gap 테이블의 번호 (1 이상 정수). 탐색(EXPLORE/전체 공정) 로그에 찍힌 gap_id 를 매번 넣는다')
 
 
 def _db_task(process, label, desc, params):
@@ -126,87 +102,12 @@ TASKS = [
 
     # ===== NAVIGATION =====
     {
-        'id': 'wall_size', 'group': 'navigation', 'kind': 'process',
-        'label': '벽 크기 측정',
-        'desc': '로봇 끝(TCP)으로 벽을 살짝 더듬어 벽의 높이·너비를 잰다. 결과는 size_*.json 으로 저장. '
-                '(wall_size)',
-        'params': [
-            _p('dir', '탐색 축/방향', 'select', '+x', ['+x', '-x', '+y', '-y'],
-               help_='벽이 있는 방향 (로봇 base 기준). 시작 자세 J1 과 그리퍼가 이 방향을 향함'),
-            _p('start_dist', '출발 거리 (mm)', 'number', 300.0,
-               help_='base 에서 탐색 방향으로 이만큼 떨어진 곳에서 바닥을 찍고 벽 쪽으로 출발. 벽보다 앞이어야 함'),
-            _p('max_dist', '최대 탐색 거리 (mm)', 'number', 800.0,
-               help_='base 에서 이 거리까지 가도 벽이 없으면 중단. 작업 반경(약 900) 안으로'),
-            _p('fast_until', '빠른 전진 거리 (mm)', 'number', 0.0,
-               help_='base 에서 이 거리까지는 30mm/s 로 빠르게 (벽이 확실히 없는 구간). 0 = 처음부터 천천히'),
-            _p('floor_guess', '바닥 높이 추정 (mm)', 'number', 50.0,
-               help_='대략적인 바닥 Z. 이 +60mm 부터 천천히 내려가고 -100mm 까지 못 찾으면 중단'),
-            _p('scan', '측정 방식', 'select', 'both', ['both', 'width', 'height', 'lines'],
-               help_='both=너비+높이 스윕 / width=너비만 / height=높이만 / lines=빠른 측정(몇 줄만)'),
-            _p('center', '옆 중심 (mm)', 'number', 0.0,
-               help_='벽 가운데의 옆 좌표 (±x 방향이면 Y, ±y 방향이면 X)'),
-            _p('lat_min', '옆 최소 (mm)', 'number', -320.0, help_='옆 방향 탐색 최소 좌표 (벽보다 넓게)'),
-            _p('lat_max', '옆 최대 (mm)', 'number', 320.0, help_='옆 방향 탐색 최대 좌표 (벽보다 넓게)'),
-            _p('z_limit', '높이 한계 (mm)', 'number', 450.0, help_='이 높이(Z) 이상은 올라가지 않음 (벽보다 높게)'),
-            _p('step', '스윕 간격 (mm)', 'number', 10.0, help_='both/width/height: 한 번에 옮기는 거리. 작을수록 정밀·느림'),
-            _p('zs', '빠른 측정 높이들', 'text', '50,150,250',
-               help_='lines 일 때만: 너비를 잴 바닥 기준 높이 목록 (쉼표로 구분). 높이 측정 위치는 자동'),
-        ],
-        'build': _wall_size, 'motion': lambda mode: True,
-    },
-    {
-        'id': 'wall_navigation', 'group': 'navigation', 'kind': 'process',
-        'label': '벽면 스캔',
-        'desc': '벽면을 눌러 보며(프로빙) 미끄러지듯 스캔한 뒤 벽 3D 모델을 만든다. (wall_navigation)',
-        'params': [
-            _p('modeling', '끝나고 모델링', 'bool', True, help_='스캔이 끝나면 바로 벽 모델링까지 실행'),
-            _p('show_plot', '그림 창 띄우기', 'bool', False, help_='matplotlib 그래프 창 표시 (창을 닫아야 진행)'),
-            _p('rviz', 'RViz 마커', 'bool', True, help_='스캔 점을 RViz 에 표시'),
-        ],
-        'build': _wall_navigation, 'motion': lambda mode: True,
-    },
-    {
-        'id': 'table_navigation', 'group': 'navigation', 'kind': 'process',
-        'label': '상판 스캔',
-        'desc': '테이블 상판 영역을 티칭하거나(teach), 탐색해서(explore) 높이 지도를 만든다(model). '
-                '(table_navigation)',
-        'params': [
-            _p('task', '작업', 'select', 'explore', ['explore', 'teach', 'model'],
-               help_='teach=영역 꼭짓점 기록 / explore=영역 탐색 / model=저장된 데이터로 모델링'),
-            _p('area', '영역 x_min,x_max,y_min,y_max', 'text', '', help_='비우면 티칭 파일 사용'),
-            _p('table_z', '상판 대략 높이 (mm)', 'text', '', help_='비우면 자동으로 찾음'),
-            _p('speed', '속도 배율', 'number', 1.0,
-               help_='노드 자체 속도 배율 (0.05~1.0). 상단 속도 % 와 곱해짐'),
-            _p('dry_run', '닿지 않고 경로만 순회', 'bool', False, help_='벽/상판에 닿지 않고 이동 경로만 확인'),
-            _p('go_home', '끝나고 홈 복귀', 'bool', False, help_='작업이 끝나면 홈 자세로 돌아감'),
-            _p('show_plot', '그림 창 띄우기', 'bool', False, help_='matplotlib 그래프 창 표시'),
-            _p('rviz', 'RViz 마커', 'bool', True, help_='탐색 점을 RViz 에 표시'),
-        ],
-        'build': _table_navigation, 'motion': lambda mode: True,
-    },
-    {
-        'id': 'wall_modeling', 'group': 'navigation', 'kind': 'process',
-        'label': '벽 모델링',
-        'desc': '최근 벽 탐색 데이터로 모델링만 다시 한다. 로봇은 움직이지 않음.',
-        'params': [
-            _p('show_plot', '그림 창 띄우기', 'bool', False, help_='결과 그래프 창 표시'),
-            _p('rviz', 'RViz 표시 (정지할 때까지)', 'bool', False, help_='정지 버튼을 누를 때까지 RViz 에 계속 표시'),
-        ],
-        'build': _wall_modeling, 'motion': lambda mode: False,
-    },
-    {
-        'id': 'wall_size_rviz', 'group': 'navigation', 'kind': 'service',
-        'label': '측정 결과 다시 보기',
-        'desc': '가장 최근 size_*.json 측정 결과를 RViz 에 다시 표시한다. 정지할 때까지 계속 실행.',
+        'id': 'explore_server', 'group': 'navigation', 'kind': 'service',
+        'label': '탐색 액션 서버',
+        'desc': '/process/explore 액션 서버 (wall_tap 실행 → 벽/틈을 DB 로). [공정(DB)] 탐색·전체 공정 전에 먼저 시작.',
         'params': [],
-        'build': lambda mode, p: [_run('wall_size_rviz')], 'motion': lambda mode: False,
-    },
-    {
-        'id': 'navigation_rviz_sim', 'group': 'navigation', 'kind': 'service',
-        'label': 'RViz 시뮬레이션',
-        'desc': '탐색 / 틈 감지 과정을 RViz 마커로 시뮬레이션한다. 로봇은 움직이지 않음.',
-        'params': [],
-        'build': lambda mode, p: [_run('navigation_rviz_sim')], 'motion': lambda mode: False,
+        'build': lambda mode, p: [_run('explore_server', *_ros_params(mode=mode))],
+        'motion': lambda mode: False, 'mode_bound': True,
     },
 
     # ===== PUTTY =====
@@ -244,7 +145,7 @@ TASKS = [
                 '[공정(DB)] 퍼티 전에 먼저 시작 (virtual 이면 가상 그리퍼).',
         'params': [],
         'build': lambda mode, p: [_run('putty_task_server', *_ros_params(process_virtual_mode=mode != 'real'))],
-        'motion': lambda mode: False,
+        'motion': lambda mode: False, 'mode_bound': True,
     },
 
     # ===== SANDING =====
@@ -261,7 +162,8 @@ TASKS = [
         'label': '샌딩 작업 실행',
         'desc': '도구 거치대에서 도구를 집고 → 시작점에서 종료점까지 직선으로 샌딩한다 (ToolTask goal 전송).',
         'params': [
-            _p('tool_id', '도구 번호', 'select', '1', ['1', '2', '3'], help_='거치대에서 집을 도구 번호'),
+            _p('tool_id', '도구 번호', 'select', '1', ['1'],
+               help_='거치대에서 집을 도구 번호 (sanding_server TOOL_POSX 에 위치가 등록된 것만)'),
             _p('start_posx', '시작 posx x,y,z,a,b,c', 'text', DEFAULT_START,
                help_='작업 시작 위치 (BASE 기준, mm / deg)'),
             _p('end_posx', '종료 posx x,y,z,a,b,c', 'text', DEFAULT_END,
@@ -278,8 +180,8 @@ TASKS = [
         'desc': f'관절 홈 자세({HOME_J})로 이동한다. 이미 홈이면 움직이지 않음. (homeset)',
         'params': [
             _p('home', '홈 관절 J1..J6 (deg)', 'text', HOME_J),
-            _p('vel', '관절 속도 (deg/s)', 'number', HOME_BASE_VEL, scale=True),
-            _p('acc', '관절 가속도 (deg/s²)', 'number', HOME_BASE_VEL, scale=True),
+            _p('vel', '관절 속도 (deg/s)', 'number', HOME_BASE_VEL, scale=True, min_=1.0, max_=60.0),
+            _p('acc', '관절 가속도 (deg/s²)', 'number', HOME_BASE_VEL, scale=True, min_=1.0, max_=60.0),
         ],
         'build': _homeset, 'motion': lambda mode: True,
     },
@@ -309,9 +211,22 @@ def normalize_params(task, raw):
         key, type_ = spec['key'], spec['type']
         value = raw.get(key, spec['default'])
         if type_ == 'number':
-            value = float(value)
+            if value is None or str(value).strip() == '':
+                raise ValueError(f'{spec["label"]}: 값을 입력하세요')
+            try:
+                value = float(value)
+            except (TypeError, ValueError):
+                raise ValueError(f'{spec["label"]}: 숫자가 아닙니다') from None
             if value != value or value in (float('inf'), float('-inf')):
                 raise ValueError(f'{spec["label"]}: 숫자가 아닙니다')
+            if spec.get('integer'):
+                if value != int(value):
+                    raise ValueError(f'{spec["label"]}: 정수를 입력하세요 ({value:g})')
+                value = int(value)
+            if spec.get('min') is not None and value < spec['min']:
+                raise ValueError(f'{spec["label"]}: {spec["min"]:g} 이상이어야 합니다 ({value:g})')
+            if spec.get('max') is not None and value > spec['max']:
+                raise ValueError(f'{spec["label"]}: {spec["max"]:g} 이하여야 합니다 ({value:g})')
         elif type_ == 'bool':
             value = value if isinstance(value, bool) else str(value).lower() in ('1', 'true', 'yes', 'on')
         elif type_ == 'select':
@@ -322,6 +237,8 @@ def normalize_params(task, raw):
             value = str(value).strip()
             if any(c in value for c in '\n\r\0'):
                 raise ValueError(f'{spec["label"]}: 줄바꿈은 쓸 수 없습니다')
+            if spec.get('maxlen') and len(value) > spec['maxlen']:
+                raise ValueError(f'{spec["label"]}: {spec["maxlen"]}자 이하로 입력하세요 ({len(value)}자)')
         out[key] = value
     return out
 

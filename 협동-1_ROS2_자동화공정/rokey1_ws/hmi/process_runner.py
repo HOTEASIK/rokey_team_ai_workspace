@@ -1,4 +1,4 @@
-"""웹 시작 버튼 → /process/* 액션 호출 → DB 기록 (예전 manager.py 대체).
+"""웹 시작 버튼 → /process/* 액션 호출 → DB 기록.
 
   ALL     : EXPLORE → 찾은 틈마다 PUTTY → 틈마다 SANDING
   PUTTY 1회 = /process/putty_load (판에서 퍼티 묻히기, robot.yaml putty_load_line) → /process/putty (틈 도포)
@@ -84,11 +84,11 @@ class ProcessRunner:
 
     def _steps(self, run, run_id, task, gap_id):
         if task in ('PUTTY', 'SANDING'):
-            pts = self.db.gap_points(gap_id)
-            if pts is None:
+            row = self.db.gap_points(gap_id)
+            if row is None:
                 self.hub.log('ERROR', 'DB', f'gap_id={gap_id} 가 DB에 없습니다', run_id=run.id)
                 return 'E_NO_GAP'
-            return self._each(run, run_id, [task], [(gap_id, pts)])
+            return self._each(run, run_id, [task], [(gap_id, row[0])], row[1])
 
         code, res = self._do(run, run_id, 'EXPLORE', -1, [0.0] * 6)
         if code != 'OK':
@@ -102,9 +102,10 @@ class ProcessRunner:
         self.hub.log('INFO', 'DB', f'wall_id={wall_id} · gap_id={[gid for gid, _ in gaps]}', run_id=run.id)
         if task == 'EXPLORE':
             return 'OK'
-        return self._each(run, run_id, ['PUTTY', 'SANDING'], gaps)
+        return self._each(run, run_id, ['PUTTY', 'SANDING'], gaps, list(res.wall))
 
-    def _each(self, run, run_id, tasks, gaps):
+    def _each(self, run, run_id, tasks, gaps, wall):
+        """wall: 틈이 있는 벽 4점 (퍼티/샌딩 goal 에 같이 보냄 → 샌딩이 벽 법선 계산)"""
         line = CFG.get('putty_load_line') or {}
         load = list(line.get('start', [])) + list(line.get('end', []))
         for task in tasks:
@@ -114,16 +115,16 @@ class ProcessRunner:
                     if len(p) != 6:
                         self.hub.log('ERROR', t, 'robot.yaml putty_load_line {start, end} 설정 필요', run_id=run.id)
                         return 'E_NO_GAP'
-                    code, _ = self._do(run, run_id, t, gid or -1, p)
+                    code, _ = self._do(run, run_id, t, gid or -1, p, wall)
                     if code != 'OK':
                         return code
         return 'OK'
 
-    def _do(self, run, run_id, task, gap_id, pts):
+    def _do(self, run, run_id, task, gap_id, pts, wall=None):
         """공정 1개. 반환: ('OK' | 'STOP' | 오류코드, result)"""
         if run.stop_requested:
             return 'STOP', None
-        res = self._send(run, run_id, task, gap_id, pts)
+        res = self._send(run, run_id, task, gap_id, pts, wall)
         if run.stop_requested:
             return 'STOP', res
         if res is not None and res.success:
@@ -138,12 +139,13 @@ class ProcessRunner:
         self.hub.log('ERROR', task, f'{code}: {reason}', run_id=run.id)
         return code, res
 
-    def _send(self, run, run_id, task, gap_id, pts):
+    def _send(self, run, run_id, task, gap_id, pts, wall=None):
         cli = self.clients[task]
         if not cli.wait_for_server(timeout_sec=3.0):
             return None
         goal = Process.Goal(task_code=task, run_id=run_id, gap_id=gap_id,
-                            start_point=[float(v) for v in pts[:3]], end_point=[float(v) for v in pts[3:6]])
+                            start_point=[float(v) for v in pts[:3]], end_point=[float(v) for v in pts[3:6]],
+                            wall=[float(v) for v in (wall or [0.0] * 12)])
 
         def on_feedback(msg):
             fb = msg.feedback

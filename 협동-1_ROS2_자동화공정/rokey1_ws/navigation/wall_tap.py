@@ -60,7 +60,7 @@ wall_size.py 는 벽을 누른 채 미끄러지며 재는 방식이고, 이 노�
   - start : 벽보다 확실히 앞, 바닥 위. 이 아래(-Z)로 floor_depth 안에 바닥이 있어야 함
   - start 에서 +X 로 wall_search 안에 벽이 있어야 함
   - z_limit / lat_min~lat_max : 벽보다 넓게, 하지만 작업 영역 안
-  - TCP_NAME(wall_navigation.py) 이 '닫힌 손가락 끝' 으로 등록돼 있어야 측정값이 손끝 위치가 됨
+  - TCP_NAME(config/robot.yaml) 이 '닫힌 손가락 끝' 으로 등록돼 있어야 측정값이 손끝 위치가 됨
   - 처음엔 force 를 작게(5~10N), 작은 범위로 바닥/첫 벽만 먼저 시험
   - 오차를 보려면 실제 치수를 자로 재서 true_height / true_width 로 넣을 것
 """
@@ -77,6 +77,7 @@ import rclpy
 import DR_init
 from rcl_interfaces.msg import ParameterDescriptor
 
+from utils.config import CFG
 from utils.shutdown import safe_shutdown
 
 try:
@@ -90,8 +91,7 @@ except ImportError:
     from wall_size_rviz import WallSizeViz
     from force_guard import ForceGuard, ToolCollision, ArmCollision, ControllerStop, SensorFault
 
-ROBOT_ID = 'dsr01'
-ROBOT_MODEL = 'm0609'
+from utils.robot import ROBOT_ID, ROBOT_MODEL  # config/robot.yaml robot 섹션
 
 
 # =============================================================================
@@ -199,6 +199,10 @@ class Cfg:
 
 
 C = Cfg()
+for _k, _v in (CFG.get('wall_tap') or {}).items():   # robot.yaml wall_tap 이 기본값 (-p 파라미터가 있으면 그게 우선)
+    if not hasattr(Cfg, _k):
+        raise KeyError(f'robot.yaml wall_tap.{_k}: wall_tap Cfg 에 없는 이름')
+    setattr(C, _k, tuple(_v) if isinstance(_v, list) else _v)
 
 
 def unit(v):

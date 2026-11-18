@@ -25,6 +25,7 @@ const ui = {
   taskId: null,
   mode: 'virtual',
   values: {},          // task_id → {key: value}
+  temp: {},            // remember=false 항목 (저장 안 함, 새로고침하면 비움)
   logs: [],
   filter: 'ALL',
   faults: 0,
@@ -73,7 +74,9 @@ function renderTaskList() {
   renderParams();
 }
 
-const fmtDefault = (p) => (p.type === 'bool' ? (p.default ? '켬' : '끔') : p.default === '' ? '(비움 = 자동)' : String(p.default));
+const fmtDefault = (p) => (p.type === 'bool' ? (p.default ? '켬' : '끔') : p.default === '' ? (p.type === 'number' ? '없음 · 직접 입력' : '(비움 = 자동)') : String(p.default));
+const storeOf = (task, p) => (p.remember === false ? (ui.temp[task.id] ||= {}) : (ui.values[task.id] ||= {}));
+const rangeText = (p) => [p.min != null ? `${p.min} 이상` : '', p.max != null ? `${p.max} 이하` : '', p.integer ? '정수' : '', p.maxlen ? `${p.maxlen}자 이하` : ''].filter(Boolean).join(' · ');
 const isDefault = (p, v) => (p.type === 'bool' ? Boolean(v) === Boolean(p.default) : p.type === 'number' ? Number(v) === Number(p.default) : String(v) === String(p.default));
 
 function renderParams() {
@@ -81,17 +84,18 @@ function renderParams() {
   $('taskDesc').textContent = task ? task.desc : '';
   $('resetParamsBtn').hidden = !task || !task.params.length;
   if (!task) { $('paramGrid').innerHTML = ''; $('paramChanged').textContent = ''; return; }
-  const vals = (ui.values[task.id] ||= {});
   $('paramGrid').innerHTML = task.params.map((p) => {
-    const v = vals[p.key] ?? p.default;
+    const v = storeOf(task, p)[p.key] ?? p.default;
     const id = `p_${task.id}_${p.key}`;
     let input;
     if (p.type === 'select') input = `<select id="${id}" data-key="${p.key}">${p.options.map((o) => `<option ${String(o) === String(v) ? 'selected' : ''}>${esc(o)}</option>`).join('')}</select>`;
     else if (p.type === 'bool') input = `<label class="switch"><input type="checkbox" id="${id}" data-key="${p.key}" ${v ? 'checked' : ''}/><span></span></label>`;
-    else input = `<input id="${id}" data-key="${p.key}" type="${p.type === 'number' ? 'number' : 'text'}" step="any" value="${esc(v)}" placeholder="${esc(p.default)}" />`;
+    else if (p.type === 'number') input = `<input id="${id}" data-key="${p.key}" type="number" step="${p.integer ? 1 : 'any'}"${p.min != null ? ` min="${p.min}"` : ''}${p.max != null ? ` max="${p.max}"` : ''} required value="${esc(v)}" placeholder="${p.default === '' ? '입력 필요' : esc(p.default)}" />`;
+    else input = `<input id="${id}" data-key="${p.key}" type="text"${p.maxlen ? ` maxlength="${p.maxlen}"` : ''} value="${esc(v)}" placeholder="${esc(p.default)}" />`;
     const wide = p.type === 'text' ? ' wide' : '';
     const changed = isDefault(p, v) ? '' : ' changed';
-    const help = `${p.help ? `${esc(p.help)} · ` : ''}<em>기본 ${esc(fmtDefault(p))}</em>${p.scale ? ' · <em class="scale-tag">속도% 적용</em>' : ''}`;
+    const range = rangeText(p);
+    const help = `${p.help ? `${esc(p.help)} · ` : ''}<em>기본 ${esc(fmtDefault(p))}</em>${range ? ` · ${esc(range)}` : ''}${p.scale ? ' · <em class="scale-tag">속도% 적용</em>' : ''}`;
     const head = `<span class="pf-label">${esc(p.label)}</span>`;
     const body = p.type === 'bool' ? `<div class="pf-row">${head}${input}</div>` : `${head}${input}`;
     return `<label class="param-field${wide} ${p.type}${changed}" data-field="${p.key}">${body}<small class="pf-help">${help}</small></label>`;
@@ -99,7 +103,7 @@ function renderParams() {
   const update = () => {
     let n = 0;
     task.params.forEach((p) => {
-      const d = isDefault(p, vals[p.key] ?? p.default);
+      const d = isDefault(p, storeOf(task, p)[p.key] ?? p.default);
       if (!d) n += 1;
       $('paramGrid').querySelector(`[data-field="${p.key}"]`)?.classList.toggle('changed', !d);
     });
@@ -107,7 +111,8 @@ function renderParams() {
     $('paramChanged').classList.toggle('changed', n > 0);
   };
   $('paramGrid').querySelectorAll('[data-key]').forEach((el) => el.addEventListener('change', () => {
-    vals[el.dataset.key] = el.type === 'checkbox' ? el.checked : el.value;
+    const p = task.params.find((x) => x.key === el.dataset.key);
+    storeOf(task, p)[el.dataset.key] = el.type === 'checkbox' ? el.checked : el.value;
     saveUi();
     update();
   }));
@@ -118,6 +123,7 @@ function resetParams() {
   const task = currentTask();
   if (!task) return;
   ui.values[task.id] = {};
+  ui.temp[task.id] = {};
   saveUi();
   renderParams();
   toast(`${task.label} · 입력값을 기본값으로 되돌렸습니다.`, 'info');
@@ -129,7 +135,8 @@ function collectParams() {
   task.params.forEach((p) => {
     const el = $(`p_${task.id}_${p.key}`);
     if (!el) return;
-    out[p.key] = p.type === 'bool' ? el.checked : p.type === 'number' ? Number(el.value) : el.value;
+    // 빈 숫자 칸은 0 으로 바꾸지 않고 '' 로 보냄 → 서버가 '값을 입력하세요' 로 거부
+    out[p.key] = p.type === 'bool' ? el.checked : p.type === 'number' ? (el.value.trim() === '' ? '' : Number(el.value)) : el.value;
   });
   return out;
 }

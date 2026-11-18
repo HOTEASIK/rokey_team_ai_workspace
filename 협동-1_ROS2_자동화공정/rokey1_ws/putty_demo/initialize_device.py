@@ -11,13 +11,11 @@ import math
 
 
 # ===== 설정 / 하이퍼파라미터 =====
-HOME_J = (0.0, 0.0, 90.0, 0.0, 90.0, 0.0)
+from utils.robot import HOME_J, ROBOT_ID, ROBOT_MODEL  # config/robot.yaml robot 섹션
 HOME_TOLERANCE_DEG = 0.5
 ON = 1
 OFF = 0
 # ===== 로봇 초기화 설정 =====
-ROBOT_ID = 'dsr01'
-ROBOT_MODEL = 'm0609'
 
 
 # ===== 메인 =====

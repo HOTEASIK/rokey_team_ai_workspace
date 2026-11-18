@@ -19,8 +19,8 @@ HANDLE_RADIUS = 4.0
 SURFACE_Z = 35.0
 EDGE_OFFSET = (0.0, 0.0, 126.0)
 SAMPLES = 21
-ROBOT_ID = 'dsr01'
-EXPECTED_TCP = 'GripperDA_v1'
+from utils.robot import ROBOT_ID, TCP_NAME  # config/robot.yaml robot 섹션
+EXPECTED_TCP = TCP_NAME
 TRANSFER_Z = 245.14
 
 

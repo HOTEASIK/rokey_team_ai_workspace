@@ -4,6 +4,10 @@ import math
 import sys
 
 from .action_worker import MODULES
+from utils.wall import wall_normal
+
+# 퍼티 도포는 BASE +X 벽(법선 −X)만 지원. 벽 4점으로 계산한 법선이 −X 에서 이 각도 넘게 벗어나면 거부
+WALL_TILT_MAX_DEG = 5.0
 
 
 # 임의 실행 파일/ROS 옵션 주입 없이, 작업별 설정만 허용한다.
@@ -109,6 +113,10 @@ def process_putty_goal(request, settings, virtual_mode=False):
     if (len(start) != 3 or len(end) != 3 or not all(map(math.isfinite, start+end)) or
             end[2] <= start[2] or any(abs(start[i]-end[i]) > 1e-6 for i in (0, 1))):
         raise ValueError('E_NO_GAP: 현재 도포는 BASE X/Y 고정 +Z 방향의 세로 홈만 지원합니다.')
+    normal = wall_normal(getattr(request, 'wall', []))     # 4점이 없으면(None) 기존처럼 +X 벽으로 봄
+    if normal is not None and -normal[0] < math.cos(math.radians(WALL_TILT_MAX_DEG)):
+        raise ValueError(f'E_NO_WALL: 현재 도포는 BASE +X 벽만 지원합니다 '
+                         f'(벽 법선 {[round(v, 3) for v in normal]}, 허용 {WALL_TILT_MAX_DEG:g}°).')
     cfg = settings['force']['putty_scrape']
     target = list(cfg['target'])
     if (cfg.get('ref', 0) != 0 or list(cfg['direction']) != [1, 0, 0, 0, 0, 0] or
@@ -145,6 +153,8 @@ def process_error_code(message):
     text = message.lower()
     if 'e_no_gap' in text:
         return 'E_NO_GAP'
+    if 'e_no_wall' in text:
+        return 'E_NO_WALL'
     if '특이점' in text or 'singular' in text:
         return 'E_SINGULAR'
     if '정리 확인 실패' in text or '정지 확인 실패' in text:
