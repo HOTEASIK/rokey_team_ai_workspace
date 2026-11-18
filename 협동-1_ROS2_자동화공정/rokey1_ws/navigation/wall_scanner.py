@@ -1,3 +1,4 @@
+
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
@@ -45,7 +46,7 @@ VERTICAL_STEP = 35.0
 HORIZONTAL_STEP = 5.0
 
 # 벽 앞에서 처음 접근할 때 띄울 거리
-APPROACH_DISTANCE = 350.0
+APPROACH_DISTANCE = 340.0
 
 # 접촉 상태에서 벽으로부터 유지할 위치 오프셋
 # 실제 접촉은 힘 제어가 담당
@@ -441,27 +442,17 @@ def main(args=None):
         # 5. 현재 TCP 자세 읽기
         # -------------------------------------------------
 
-        current_pose = get_current_posx()
+        
 
-        # 일반적인 반환 형식:
-        # ([x, y, z, r, p, yaw], solution_space)
-        if (
-            isinstance(current_pose, (list, tuple))
-            and len(current_pose) == 2
-            and isinstance(current_pose[0], (list, tuple))
-        ):
-            current_pose = current_pose[0]
+        # 사용자가 지정한 TCP 위치 (x, y, z)
+        TARGET_TCP = [733.62, 203.20, 274.61]
 
-        if current_pose is None or len(current_pose) < 6:
-            raise RuntimeError(
-                "현재 TCP 자세를 읽지 못했습니다."
-            )
+        # 사용자가 지정한 TCP 자세 (rx, ry, rz)
+        ORIENTATION = [13.68, 132.34, 91.18]
 
-        ORIENTATION = list(current_pose[3:6])
+        print(f"[INFO] 목표 TCP 위치: {TARGET_TCP}")
+        print(f"[INFO] 목표 TCP 자세: {ORIENTATION}")
 
-        print(
-            f"[INFO] 현재 TCP 자세: {ORIENTATION}"
-        )
 
         # -------------------------------------------------
         # 6. 벽의 왼쪽 위 접근 위치로 이동
@@ -479,10 +470,9 @@ def main(args=None):
         )
 
         result = movel(
-            approach_target,
+            posx(*TARGET_TCP, *ORIENTATION),
             vel=SCAN_VEL,
-            acc=SCAN_ACC,
-            ref=DR_BASE
+            acc=SCAN_ACC
         )
 
         check_api_result(
@@ -632,3 +622,4 @@ def main(args=None):
 
 if __name__ == "__main__":
     main()
+
