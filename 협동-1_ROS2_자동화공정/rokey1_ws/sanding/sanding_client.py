@@ -3,7 +3,7 @@
 HMI 없이 터미널에서 시험할 때 사용합니다. (HMI 를 쓰면 이 파일은 필요 없음)
 
 기본 (파라미터 없이 실행) = 서버의 기본 작업:
-  도구 1 [347.35, -16.43, 90.10, 14.00, 178.37, 12.66] 집기 →
+  도구 1 [-499.65, -365.20, 70.02, 135.28, 179.65, 133.01] 집기 →
   시작 관절각 [-8.21, 31.18, 114.93, -10.05, -50.25, 100.44] 의 TCP 에서 베이스 +Y 10cm 작업
   (start_posx 를 비워서(전부 0) 보내면 서버가 기본 작업을 함)
 
@@ -22,10 +22,9 @@ import rclpy
 from rclpy.action import ActionClient
 from rclpy.signals import SignalHandlerOptions
 
-# 팀 레포(rokey1)로 옮길 때는 rokey_interfaces 로 바꾸면 됩니다
 from rokey_interfaces.action import ToolTask
 
-from sanding.sanding_job import ROBOT_ID
+from utils.robot import ROBOT_ID  # config/robot.yaml robot 섹션
 from sanding.sanding_server import ACTION_NAME
 
 DEFAULT_TOOL_ID = 1

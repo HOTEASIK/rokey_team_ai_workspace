@@ -1,408 +1,283 @@
-# 퍼티 작업 노드
+# 퍼티 작업 노드 (putty_demo)
 
-ROS 2 Jazzy / M0609 / RG2, 네임스페이스 `dsr01`, TCP `GripperDA_v1`을 사용합니다.
-bringup의 real/virtual 연결에 이동 요청을 보내며 로그 전용 실행·가짜 응답 모드는 없습니다.
-가상 집게 `--virtual-gripper`는 실제 가상 서비스를 호출하는 옵션으로 유지합니다.
+M0609 + RG2로 헤라를 집어 퍼티를 뜨고, 벽에 힘제어로 바른 뒤 헤라를 반납하는 ROS 2 노드 모음입니다.
+ROS 2 Jazzy, 네임스페이스 `dsr01`, TCP `GripperDA_v1`, 툴 무게 `Tool Weight`를 사용합니다.
 
-현재 HMI/공정 launch는 `/dsr01/putty_task` Action으로 작업을 요청합니다.
-이동 중 피드백·취소·실제 정지/힘 해제 확인 및 실행 예시는 [ACTIONS.md](ACTIONS.md)를 확인합니다.
-아래 기존 `ros2 run initialize_device` 등은 수동 실행 호환 경로입니다.
+> [!NOTE]
+> 이 문서는 2026-11-19 코드 기준입니다. 소스 폴더는 `src/rokey1_ws`지만 ROS 패키지 이름은 **`rokey1`**입니다.
+> 액션 서버·취소 절차는 [ACTIONS.md](ACTIONS.md), 처음 읽는 팀원용 흐름 설명은 [actions_skill.md](actions_skill.md)를 봅니다.
+> 단계별 함수 동작(무엇을 받고 무엇을 검사하고 어떤 두산 요청을 보내는지)은 [CODE_WALKTHROUGH.md](CODE_WALKTHROUGH.md)를 봅니다.
 
-## 도포 특이점 처리
+## 공정
 
-`apply_putty_plane`은 이동 전에 다음 정책을 설정하고 응답 성공을 확인합니다.
+```text
+초기화(홈) → 헤라 집기 → 퍼티 뜨기 → 벽에 도포 → 헤라 반납 → 초기화(홈)
+```
 
-- `motion/set_singularity_handling`: `SetSingularityHandling`, mode=0 (`DR_AVOID`, 자동 회피).
-- `motion/set_singular_handling_force`: `SetSingularHandlingForce`, mode=0 (`DR_SINGULARITY_ERROR`).
-  이전 로그의 mode=1(에러 무시)을 유지하지 않습니다.
-- 별도 노드 `/dsr01/putty_singularity_monitor`가 `/dsr01/error`의 `RobotError`를 수신합니다.
-  code=3205 영역 진입과 특이점 경고/에러를 감지하면 해당 실행을 중단합니다.
-  명시적 Inside→Outside 알림만으로는 중단하지 않지만, 이미 감지한 위험을 자동 해제하지 않습니다.
-- 동기 MoveLine/MoveSplineTask 서비스 응답 대기도 0.05초씩 나눠 알람을 확인합니다.
-- 감지 후 정지 확인 → 활성 힘/컴플라이언스 해제 → 실패 결과 반환.
-  자동 MoveJ 회복·재접근·재시도는 없습니다. Action 경로는 서버도 정리를 재확인합니다.
-- 감시 publisher 없음/소실, 감시 스레드 중단 또는 정책 설정 실패 시 이동을 시작하지 않거나 중단합니다.
+| 작업 | 실행 파일 | 하는 일 | 실물/가상 |
+|---|---|---|---|
+| `initialize` | [initialize_device.py](initialize_device.py) | 홈 관절 자세로 이동, 그리퍼 닫기 | 둘 다 |
+| `pickup` | [pickup_spatula.py](pickup_spatula.py) | 로봇 뒤쪽 보관대에서 헤라 집기 | 둘 다 |
+| `scoop` | [scoop_putty.py](scoop_putty.py) | 헤라를 기울여 용기에서 퍼티 뜨기 | 둘 다 (실물은 파지 확인 필요) |
+| `apply` | [apply_putty_plane.py](apply_putty_plane.py) | 벽 앞으로 이동, 바닥·벽 찾기, +X 힘제어로 상향 도포 | 둘 다 |
+| `return` | [return_spatula.py](return_spatula.py) | 보관대에 헤라 반납 (실물은 바닥을 힘으로 감지) | 둘 다 |
+| `load` | [load_putty.py](load_putty.py) | 판에 퍼티 묻히기 (현재 공정 흐름에는 없음) | 둘 다 (실물은 파지 확인 필요) |
 
-현재 V2 드라이버에는 `get_force_control_state` ROS 서비스가 없으므로 직접 위험도 0/1/2를
-조회하는 구현은 아닙니다. 알람 부재는 현재 자세가 안전하다는 뜻이 아니며, 컨트롤러의
-힘 제어 진입 시 특이점 에러 정책을 함께 사용합니다. 과거 최신 알람을 현재 상태로 오인하지 않습니다.
-자동 회피는 경로를 바꿀 수 있으며, 이미 특이점인 자세에서 벗어나는 동작을 보장하지 않습니다.
-이 설정만으로 6 N 형성 문제가 해결됐다고 볼 수 없습니다. 경로/힘 수치는 기존 그대로입니다.
-소프트웨어 알람 감시의 지연은 통신/스케줄링에 영향을 받으며 실시간 보호 기능이 아닙니다.
-정책은 컨트롤러에 적용되며 이전 값을 조회할 API가 없어 종료 시 임의 값으로 복원하지 않습니다.
+## 파일 구조
 
-## 실행 조건
+```text
+putty_demo/
+├─ 작업 노드 (ros2 run으로 직접 실행)
+│  ├─ initialize_device.py   홈 복귀 + 그리퍼 닫기
+│  ├─ pickup_spatula.py      헤라 집기. movej 공용 함수(move_joint_to_pose, 관절 검사)도 여기 있음
+│  ├─ scoop_putty.py         퍼티 뜨기
+│  ├─ apply_putty_plane.py   벽 도포 설정·경로 계산
+│  ├─ return_spatula.py      헤라 반납
+│  └─ load_putty.py          판에 퍼티 묻히기
+├─ 공용 모듈 (노드가 import해서 씀, 단독 실행 안 함)
+│  ├─ putty_motion.py        도포 실행부: 서비스 호출, 힘 유지, 벽 앞 movej
+│  ├─ contact_search.py      접촉 탐색, 누르기(direct/hybrid/position/force), 힘 판정
+│  ├─ putty_geometry.py      ZYZ 회전·좌표 계산, 헤라 방향 기준값(BLADE_REFERENCE_ABC)
+│  └─ singularity_guard.py   /dsr01/error 특이점 알람 감시
+└─ 액션 서버 (HMI·launch·팀 매니저용)
+   ├─ putty_task_server.py   /dsr01/putty_task, /process/putty, /process/putty_load
+   ├─ putty_task_client.py   터미널용 클라이언트
+   ├─ action_protocol.py     Goal 옵션 허용 목록·검증, 팀 YAML → CLI 옵션 변환
+   └─ action_process.py / action_worker.py   작업 노드를 자식 프로세스로 실행·중단
+```
 
-- argparse 노드는 `--execute-motion`을 반드시 지정해야 합니다.
-- 초기화 노드는 ROS 파라미터 `execute_motion:=true`가 필요합니다.
-- 공정 launch도 `execute_motion:=true`가 없으면 오류로 종료합니다.
-- 실행 요청 옵션을 생략해도 자동으로 움직이지 않습니다.
-- 좌표·속도·각도·오프셋·높이 기본값은 기존 값을 유지했습니다.
-- 초기화·픽업·측정 스쿱·단독 도포는 real/virtual 경로가 있습니다. 반납·기하 스쿱·전체 공정 launch는 가상 전용입니다.
-- 가상 로봇 구동과 외부 카메라는 별개입니다. 이 패키지의 작업은 카메라를 사용하지 않습니다.
+모든 노드는 `DSR_ROBOT2` 함수 대신 `dsr_msgs2` 서비스를 직접 호출합니다.
+`DSR_ROBOT2`는 응답을 시간 제한 없이 기다려 이동 중 취소·시간 초과·특이점 알람 확인을 할 수 없기 때문입니다.
+코드 주석에 각 서비스가 어떤 두산 API(`movel`, `movej`, `amovel`, `set_desired_force` 등)와 같은지 적혀 있습니다.
 
-## 공통 환경
+## 빠른 시작
+
+### 준비
 
 ```bash
 cd ~/ws_cobot_pjt/ws_dsr
 source /opt/ros/jazzy/setup.bash
-colcon build --packages-select rokey_interfaces rokey1 --symlink-install
+colcon build --base-paths src/rokey_interfaces src/rokey1_ws --packages-select rokey_interfaces rokey1
 source install/setup.bash
-export ROS_DOMAIN_ID=10
 ```
 
-기존 bringup을 별도 터미널에서 실행합니다. 코드나 launch는 컨트롤러를 새로 띄우지 않습니다.
+> [!IMPORTANT]
+> 모든 터미널(bringup 포함)이 같은 통신 설정이어야 서로 보입니다.
+> - `ROS_DOMAIN_ID=11` (`~/.bashrc`와 같은 값)
+> - `ROS_DISCOVERY_SERVER`, `ROS_SUPER_CLIENT`는 **비어 있거나 모든 터미널에서 같은 값**이어야 합니다.
+>   디스커버리 서버가 설정돼 있는데 그 서버가 꺼져 있으면 같은 PC의 노드끼리도 못 찾습니다.
+>
+> ```bash
+> echo "$ROS_DOMAIN_ID [$ROS_DISCOVERY_SERVER]"   # 11 []
+> ```
 
-## 초기화와 집기
+> [!NOTE]
+> 기존 설치가 복사 방식이라 `--symlink-install`을 붙이면 `File exists` 오류가 납니다. 붙이지 않고 빌드합니다.
+> 따라서 **코드를 고친 뒤에는 다시 빌드**해야 `ros2 run`/액션 서버에 반영됩니다.
 
-집기·반납 TCP BASE XYZABC는
-`[308.42,120.70,152.43,18.32,178.35,17.14]` (mm, degree)입니다.
-홈 상승은 홈 자세를 유지하고, 보관 위치 위에서 집기 자세로 접근·하강·집기·상승합니다.
-픽업은 XYZ 2 mm / 회전 2도 이내 도착을 확인합니다.
+로봇 연결(bringup)은 별도 터미널에서 실행합니다. 이 패키지는 컨트롤러를 새로 띄우지 않습니다.
 
 ```bash
-# 가상 집게 사용
-ros2 run rokey1 initialize_device --ros-args -p execute_motion:=true -p virtual_gripper:=true
-ros2 run rokey1 pickup_spatula --execute-motion --virtual-gripper
+# 실물 (컨트롤러와 유선 연결 필요: ping 192.168.1.100)
+ros2 launch dsr_bringup2 dsr_bringup2_rviz.launch.py mode:=real host:=192.168.1.100 port:=12345 model:=m0609
+# 가상
+ros2 launch dsr_bringup2 dsr_bringup2_rviz.launch.py mode:=virtual host:=127.0.0.1 port:=12345 model:=m0609
+```
 
-# 실물 집게: 디지털 출력 1·2번 제어, real bringup 및 장치 설정 확인 필요
+### 방법 1: 노드 직접 실행 (첫 확인용)
+
+액션 서버는 켜지 않습니다. 한 단계씩 실행하고 로봇 상태를 확인한 뒤 다음으로 넘어갑니다.
+
+```bash
 ros2 run rokey1 initialize_device --ros-args -p execute_motion:=true -p virtual_gripper:=false
-ros2 run rokey1 pickup_spatula --execute-motion
-```
-
-픽업 옵션: `--transfer-speed`, `--pick-speed`, `--clearance`, `--settle`.
-
-## 퍼티 뜨기
-
-```bash
-ros2 run rokey1 scoop_putty --execute-motion --path geometry --scoop-angle 45
-```
-
-용기 바닥 중심 BASE `[723.83,-75.62,35.36]` mm, 내부 크기 120×120×50 mm 가정입니다.
-용기가 가득 찬 표면 Z=85.36 mm에서 기본 3 mm 깊이까지 찍고 같은 각도로 수직 상승합니다.
-목표 날 기준점은 용기 중심에서 +X로 전체 X폭의 1/4 지점입니다.
-픽업 상태 퍼티 면 +X, 날 길이 +Z, TCP→날 Tool `[0,0,126]` mm 가정을 사용합니다.
-새 집기 장착 상태에서 이 가정과 오프셋은 별도로 확인해야 합니다.
-`--scoop-speed`, `--transfer-speed`, `--scoop-depth`, `--scoop-distance`,
-`--container-center`, `--container-size`, `--edge-offset`으로 기존 옵션을 사용합니다.
-`--apply-after`는 기존 16→15 도포까지 연결합니다. 별도 도포 노드를 실행한다면 생략합니다.
-
-## 도포 케이스
-
-접촉 탐색 실행 시 `[힘진단]` 로그가 바닥/벽 감지 후, 힘 설정 직전/응답 후,
-힘 안정 대기 중, 도포 중, 힘 해제 전에 출력됩니다. 도포 중에는 기존 조회값을
-재사용해 약 0.5초 이상 간격으로 출력합니다. 목표 +X 힘, 실측 BASE 힘/모멘트,
-`|Fx|`, 목표−`|Fx|`, 실제 TCP XYZABC를 확인합니다. 위치/힘은 순차 조회입니다.
-`계획날각`은 가까운 계획 경로점의 각도이며 실측 헤라 각도가 아닙니다.
-`힘설정응답확인`은 요청 응답 확인이며 컨트롤러 활성 상태 직접 조회값이 아닙니다.
-출발 전 힘 확인과 도포 중 힘 부족/초과 정지는 아래 최신 동작 절을 확인합니다.
-
-독립 도포 실행 노드는 `apply_putty_plane`만 사용합니다.
-이전 `apply_putty`, `apply_putty_j6` 실행 파일과 명령은 제거했습니다.
-현재 디스크의 원본은 `src/rokey1_ws/putty_demo/apply_putty_plane.py`입니다.
-공통 계산은 `putty_geometry.py`, ROS 통신은 `putty_motion.py`에 있으며 단독 실행 노드가 아닙니다.
-
-```bash
-# 현재 실물 YZ 벽: 바닥/벽 탐색 → 6 N 실측 안정 확인 → 힘 유지 상향 도포
+ros2 run rokey1 pickup_spatula --execute-motion --joint-speed 10 --joint-acceleration 10
+ros2 run rokey1 scoop_putty --execute-motion --scoop-angle 45        # 실물은 'y'로 파지 확인
 ros2 run rokey1 apply_putty_plane --execute-motion --contact-search \
-  --floor-force 2.3 --wall-force 2.3 --press-force 6
-
+  --floor-force 5 --wall-force 5 --press-force 3 --joint-speed 10 --joint-acceleration 10
+ros2 run rokey1 return_spatula --execute-motion --joint-speed 10 --joint-acceleration 10
+ros2 run rokey1 initialize_device --ros-args -p execute_motion:=true -p virtual_gripper:=false
 ```
 
-현재 실제 벽 좌표와 힘 제어 설정은 파일 위쪽 설정부 및 아래 최신 동작 절을 확인합니다.
-가상 벽 홈과 가로 시험 케이스 및 `--case` 선택 옵션은 제거했습니다.
+가상 모드는 집기에 `--virtual-gripper`, 초기화에 `virtual_gripper:=true`를 붙입니다.
 
-## 반납과 공정 launch
+### 방법 2: 액션 서버 + 클라이언트
 
 ```bash
-ros2 run rokey1 return_spatula --execute-motion --transfer-speed 30 --place-speed 10
-ros2 launch rokey1 initialize_pickup.launch.py execute_motion:=true virtual_gripper:=true
-ros2 launch rokey1 return_initialize.launch.py execute_motion:=true
-ros2 launch rokey1 putty_cycle.launch.py execute_motion:=true
+ros2 run rokey1 putty_task_server                      # 켜기만 해서는 움직이지 않음
+ros2 action list | grep putty                          # /dsr01/putty_task 가 보여야 함
+ros2 run rokey1 putty_task_client pickup -- --joint-speed 10
 ```
 
-초기화·집기 launch는 `virtual_gripper:=false`로 실물 DO 경로를 선택할 수 있습니다.
-반납·전체 공정 launch는 가상 전용입니다. 전체 공정은 초기화→집기→찍기→평면 도포→반납→홈이며
-전체 공정 launch의 기존 도포 좌표와 속도는 유지했습니다.
-각 단계 정상 종료 후 다음 단계로 진행하고 실패 시 후속 단계는 생략합니다.
+자세한 사용법은 [ACTIONS.md](ACTIONS.md)를 봅니다. **방법 1과 2를 동시에 쓰지 않습니다.**
 
-## 공통 코드와 제한
+## 단계별 동작과 두산 API
 
-서비스 대기는 `utils.service_waiter.ServiceWaiter`, 종료는 `utils.shutdown.safe_shutdown`입니다.
-순수 경로 계산 함수는 실제 동작 생성과 단위 테스트에 사용하므로 유지합니다.
-기존 가짜 상태 기반 `demo_cycle` 실행 항목은 제거했습니다.
-흠 탐지·접촉력 제어·전체 충돌 검사·IK 사전 검증·구간 사이 퍼티 재공급은 미구현입니다.
-타임아웃은 다음 요청을 중단하지만 로봇 이동 취소 명령을 자동으로 보내지는 않습니다.
+모든 이동은 동기(이동이 끝난 뒤 응답) 호출이고, 끝나면 실제 위치가 목표 2 mm / 2° 안인지 다시 확인합니다.
+예외로 `amovel`(비동기)은 이동 중 외력을 감시하는 구간에서만 씁니다.
 
-## 실물 측정 자세 스쿱
+### 초기화 (`initialize_device`)
 
-기준 자세는 TCP BASE XYZABC [327.73,211.45,138.58,8.45,154.91,6.58]입니다.
-작업자가 확인한 모서리 BASE Y축 평행과, 헤라 판 각도가 약 60°라는 추정값을 기준으로 합니다.
-`--scoop-angle` 하나로 헤라 판 기울기와 +X/-Z 사선 진입각을 함께 지정합니다.
-`--entry-angle`은 같은 인자의 호환 별칭이며 두 옵션을 따로 사용할 필요가 없습니다.
+| 순서 | 동작 | 두산 API |
+|---|---|---|
+| 1 | 홈 관절 `[0,0,90,0,90,0]`으로 이동 (이미 홈이면 생략) | `movej` 10 deg/s |
+| 2 | 그리퍼 닫기 | 실물 `set_digital_output` 1·2번 / 가상 `/onrobot/sendCommand 'c'` |
 
-현재 장착에서 날 길이가 -X 쪽으로 기울고 손잡이가 위인 가정으로,
-목표각 - 기준각만큼 BASE Y축 회전합니다. 60→45°는 -15° 회전입니다.
-Y축을 중심으로 회전하므로 이미 Y축과 평행하다고 확인한 모서리 방향은 유지됩니다.
-TCP→날 Tool 오프셋 [0,0,126] mm를 사용해 측정 당시 날 기준점이 유지되도록
-TCP XYZ도 함께 보정합니다. 126 mm 오프셋과 60°는 새로 실측된 값이 아니므로
-계산 결과가 실제로 정확한 45°가 됨을 보장하지 않습니다.
+### 헤라 집기 (`pickup_spatula`)
 
-기본 45° 기준 보정 찍기 TCP는 약 [300.00,211.45,121.01] mm,
-ABC는 약 [5.56,140.02,3.19]°입니다. 원래 TCP Z보다 약 17.57 mm 낮습니다.
-진입 시작점은 보정 목표에서 X -120 / Z +120 mm이며,
-찍은 뒤에는 목표 XY와 보정 ABC를 유지해 Z +120 mm 수직 상승합니다.
-기존 속도·가속도·최소 이송 높이·원본 측정 자세는 변경하지 않았습니다.
+보관대는 로봇 뒤쪽 `PICK_POSE = [-508.39, 284.79, 121.85, 136.31, -179.38, 136.56]`입니다.
+헤라가 보관대 바닥에 완전히 앉은 높이에서 잡으므로 매번 같은 깊이를 잡습니다. 이때 퍼티 면은 BASE **-X**를 봅니다.
+
+| 순서 | 동작 | 두산 API |
+|---|---|---|
+| 1 | TCP 확인·적용, 홈 관절 자세인지 확인 (±0.5°) | `get_tcp`/`set_tcp`, `get_current_posj` |
+| 2 | 홈 위로 Z 230까지 수직 상승 | `movel` 15 mm/s |
+| 3 | **직접 찍은 경유 관절 자세** `HOLDER_DETOUR_J` (121.69, -2.45, 94.67, 0.17, 88.37, 121.89)로 이동. 위에서 볼 때 반시계(J1 +121.7°). TCP (-185.48, 292.47, 204.82) | `movej` (절대 관절각, ikin 없음) |
+| 3-1 | 그 자리에서 보관대 위 이송 높이 Z 230으로 수직 상승 | `movel` 15 mm/s |
+| 3-2 | 헤라 바로 위로 직선 이동 | `movel` 15 mm/s |
+| 4 | 그리퍼 열기 → 수직 하강 → 닫기 → 수직 상승 | `set_digital_output`, `movel` 5 mm/s |
+
+지그 기준 +X 150, +Y 170 mm(BASE 약 (-358, 455))에 기둥이 있습니다. movej는 TCP가 곡선으로 움직여 기둥에 부딪쳤기 때문에,
+movej는 홈에서 movej로 기둥에 닿지 않음을 현장에서 확인한 경유 관절 자세까지만 하고 이후는 직선입니다. 직선 구간은 기둥 중심에서 100 mm 이상 떨어져야 출발합니다(계산 검사).
+
+movej 전에 다음을 검사하고 하나라도 걸리면 움직이지 않습니다.
+- 이송 높이가 바닥 대비 보관대 깊이 80 mm + 여유 20 mm 이상인지 (`check_holder_clearance`)
+- J1 회전 방향·회전량(0~180°) (`turn_joint_target`)
+- 팔꿈치 J3 ≥ 41°, 손목 |J5| ≥ 10°, 손목 뒤집힘(J5 부호 변화), 어깨 특이점(손목 중심이 베이스 축에서 180 mm 이상) (`check_joint_target`)
+
+### 퍼티 뜨기 (`scoop_putty`)
+
+용기는 보관대 바로 옆입니다. 기준점 `TAUGHT_SCOOP_POSE = [-553.78, 82.25, 122.70, 160.95, -179.05, 160.87]`은
+헤라를 수직으로 쥔 채 날 폭 가운데가 용기 -X 쪽 끝 바닥 구석에 닿은 TCP입니다. 용기는 X 110 × Y 120 × 깊이 40 mm입니다.
+
+| 순서 | 동작 | 두산 API |
+|---|---|---|
+| 0 | 경유점 + 벽 위치·긁어 올린 점·최종 상승점(계획값) 모두 관절 검사 (특이점·손목 뒤집힘) | `ikin` |
+| 1 | 현재 자세로 이송 높이 확보 | `movel` 30 mm/s |
+| 2 | 그 자리에서 헤라를 기울이기: 날 끝 고정, BASE Y축 +(90° − 각도) 회전 | `movel` |
+| 3 | 사선 시작점 위 → 시작점 (끝점에서 +X·+Z로 `entry-height` 120 mm) | `movel` |
+| 4 | **각도를 유지한 채 -X·-Z 사선 진입**. `--scoop-pass N`이면 끝점이 +X로 (N−1)×20 mm | `movel` 3 mm/s |
+| 5 | [실물] 컴플라이언스(X·Z 1000 N/m) → **-X로 밀어 벽 접촉 감지** (2 mm/s, Fx 변화 5 N 2회, 최대 회차 이동량+10 mm) | `task_compliance_ctrl`, `amovel` + `get_tool_force`, `stop(DR_HOLD)` + `check_motion` |
+| 6 | [실물] **-X 3 N 유지하며 +Z 25 mm 긁어 올리기** → 힘 해제 → 눌림 풀기 → 컴플라이언스 해제 | `set_desired_force`(REL), `movel`, `release_force`, `release_compliance_ctrl` |
+| 5'·6' | [가상] 기록된 벽 위치까지 -X 이동 → 25 mm 상승 (외력 탐색 생략) | `movel` |
+| 7 | 남은 높이 수직 상승 (끝점 기준 총 120 mm) | `movel` 3 mm/s |
+
+여러 번 뜰 때는 회차를 줍니다: 1회차 `--scoop-pass 1`(기본, 원래 끝점), 2회차 `--scoop-pass 2`(+20 mm), … 최대 4회차(+60 mm).
+`--wall-scrape-height`(기본 25 mm, 0~30)는 벽을 누르며 올라가는 높이입니다. 0이면 벽에 닿은 뒤 바로 힘을 풀고 상승합니다.
+용기 벽(깊이 40 mm)이 끝나기 전에 힘을 풀어야 누르던 방향으로 튀어 나가지 않습니다.
+실패·취소 시 정지 → 힘 → 컴플라이언스 순서로 해제합니다(액션 서버 취소 정리도 scoop을 힘 사용 작업으로 처리).
+
+- 각도는 45~60°만 허용합니다(`--scoop-angle`, 기본 **55°**). 45°는 사선 시작점에서 손목 중심이 베이스 축 위(약 132 mm)로 와 어깨 특이점(3205)·도달 불가(1206)가 났고, 50°(약 174 mm)는 출발 전 검사에 걸립니다. 기울이면 손잡이는 +X·위, 날 끝은 -X, 퍼티 면은 위를 봅니다.
+- 썰기 끝의 날 끝(폭 가운데)은 **측정 접촉점과 같습니다**(여유 없음, 2026-11-19 결정).
+  기울이면 두께 때문에 날 아래 모서리가 계산상 바닥 아래로 들어갑니다(45°에서 약 2.1 mm). 위치제어라 충돌 감지(7060)가 날 수 있습니다.
+- 사선 경로가 +X 벽 위를 충분히 높게 지나는지, 헤라 폭(100 mm 가정)이 용기 Y 폭에 들어가는지 검사합니다.
+
+### 벽 도포 (`apply_putty_plane`)
+
+기본 누르기 방식은 `--press-method direct`입니다.
+
+| 순서 | 동작 | 두산 API |
+|---|---|---|
+| 0 | 시스템 확인, Tool `Tool Weight`·TCP `GripperDA_v1` 선택 (수동 모드 → 선택 → 자동 모드) | `set_robot_mode`, `set_tool`, `set_tcp` |
+| 0 | 특이점 정책(팀 YAML의 회피 모드 + 힘제어 특이점 ERROR) 설정, 알람 감시 시작, 경로 전체 관절 검사 | `set_singularity_handling`, `set_singular_handling_force`, `ikin` |
+| 1 | 제자리에서 이송 높이 확보 | `movel` |
+| 2 | **벽 앞으로 이동. 위에서 볼 때 시계 방향(J1 감소)**, 같은 이동 안에서 J6가 약 180° 돌아 퍼티 면이 +X 벽을 향함 | `ikin` → `movej` |
+| 3 | 면 바깥 접근점(벽에서 50 mm) → 날 끝을 벽에서 10 mm, 바닥에서 10 mm 띄운 점으로 이동 | `movel` |
+| 4 | 컴플라이언스(X·Z 1000 N/m) 켜고 바닥 -Z 탐색 → 0.5 mm 들기 → Z 강성 복원 | `task_compliance_ctrl`, `amovel` + `get_tool_force` + `stop(DR_HOLD)`, `set_stiffnessx` |
+| 5 | 측정된 벽 X보다 1 mm 안쪽까지 이동, 먼저 닿으면 그 자리를 벽으로 사용 | `amovel` + `get_tool_force`, `check_motion` |
+| 6 | X 강성 200 N/m, BASE +X 3 N 힘제어(상대 모드). 목표의 70%까지 최대 3초 대기 | `set_stiffnessx`, `set_desired_force` |
+| 7 | 헤라 각도 20° → 40°로 바꾸며 날 끝 Z 206까지 상향 도포 (MoveLine 20구간) | `amovel` × 20, `check_motion` |
+| 8 | 힘 해제 → 1 mm 눌림 풀기 → 컴플라이언스 해제 → 법선 방향 후퇴 | `release_force`, `movel`, `release_compliance_ctrl` |
+
+- 컴플라이언스 중에는 컨트롤러가 `MoveSplineTask`를 거부하므로 MoveLine 구간으로 나눠 보냅니다.
+- 컴플라이언스 중에는 `get_robot_state`가 이동 중에도 STANDBY를 줄 수 있어 이동 완료는 `check_motion`으로 판정합니다.
+- 도포 중 힘 부족은 경고 로그만 남기고, |Fx| 상한(기본 20 N) 초과 시에만 정지·해제합니다.
+- 실패·Ctrl+C 시 정지를 확인한 뒤 힘·컴플라이언스 해제를 시도하며, 자동 후퇴·재시도는 하지 않습니다.
+
+### 헤라 반납 (`return_spatula`)
+
+| 순서 | 동작 | 두산 API |
+|---|---|---|
+| 0 | 경유 관절 자세 `HOLDER_DETOUR_J`의 TCP 계산 (이동 없음) | `fkin` |
+| 1 | 이송 높이까지 수직 상승 | `movel` |
+| 2 | 홈 관절 자세로 이동 (벽 앞에서 팔을 편 채 기둥 쪽으로 돌지 않게) | `movej` (관절값 그대로) |
+| 2-1 | 집기와 같은 경유 관절 자세로 이동, **반시계**. 집기 방향 자세 정렬도 이때 | `movej` (관절값 그대로) |
+| 2-2 | 보관대 위로 직선 이동 (기둥 중심에서 100 mm 이상인지 출발 전 계산 검사) | `movel` |
+| 3 | 바닥보다 15 mm 위까지 하강 | `movel` |
+| 4 | [실물] 컴플라이언스(Z 1000 N/m) → 2 mm/s 하강하며 외력 감시 → Fz 변화 5 N(2회 연속)에서 정지 | `task_compliance_ctrl`, `amovel` + `get_tool_force`, `stop(DR_HOLD)` + `check_motion` |
+| 5 | [실물] 찾은 바닥이 기록 높이 ±10 mm 안인지 확인 → 눌림 풀기 → 컴플라이언스 해제 | `movel`, `release_compliance_ctrl` |
+| 4' | [가상] 바닥 높이까지 하강 (시뮬레이터 외력값은 믿을 수 없어 힘 탐색 생략) | `movel` |
+| 6 | 그리퍼 열기 → 수직 후퇴 → 경유지로 직선 이동 | `set_digital_output` / onrobot, `movel` |
+| 7 | 홈으로 이동. 집기 때 기둥에 닿지 않은 관절 경로를 거꾸로 간다 | `movej` (관절값 그대로) |
+| 8 | 홈에서 그리퍼 닫기 | `set_digital_output` / onrobot |
+
+실패하면 정지·컴플라이언스 해제만 하고 **그리퍼는 열지 않습니다.**
+
+## 주요 설정값
+
+| 위치 | 이름 | 값 | 뜻 |
+|---|---|---|---|
+| `pickup_spatula.py` | `PICK_POSE` | 위 표 참고 | 헤라 집기·반납 TCP |
+| | `HOLDER_TRANSFER_Z_MM` | 230 | 보관대 위 이송 높이 (245는 J3 40.4°로 관절 검사에 걸림) |
+| | `HOLDER_DEPTH_MM` / `HOLDER_CLEARANCE_MM` | 80 / 20 | 보관대 깊이·여유 |
+| | `HOLDER_DETOUR_J` | (121.69, -2.45, 94.67, 0.17, 88.37, 121.89) | movej 경유 관절 자세 (현장 측정, 집기·반납 공통) |
+| | `HOLDER_PILLAR_XY` / `PILLAR_CLEARANCE_MM` | 지그 +(150, 170) / 100 | 기둥 위치·직선 구간 최소 거리 |
+| | `JOINT_SPEED_DEG_S` / `JOINT_ACCELERATION_DEG_S2` | 20 / 20 | movej 속도 (CLI `--joint-speed`) |
+| `scoop_putty.py` | `TAUGHT_SCOOP_POSE` | 위 표 참고 | 뜨기 기준점 |
+| | `SCOOP_ANGLE_RANGE_DEG` | 45~60 | 헤라 기울기 허용 범위 |
+| | `SCOOP_PASS_STEP_MM` / `SCOOP_MAX_PASS` | 20 / 4 | 회차당 끝점 +X 이동량 / 최대 회차 |
+| | `WALL_CONTACT_FORCE_N` / `WALL_SEARCH_SPEED_MM_S` | 5 / 2 | 벽 접촉 감지 힘 / 탐색 속도 |
+| | `WALL_PUSH_FORCE_N` / `WALL_SCRAPE_HEIGHT_MM` | 3 / 25 | 긁어 올릴 때 -X 힘 / 높이 |
+| | `SCRAPE_STIFFNESS` | (1000, 3000, 1000, 200, 200, 200) | 벽 긁기 컴플라이언스 강성 |
+| | `SCOOP_EDGE_OFFSET` | (0,0,147.7) | TCP → 날 끝. 두 접촉 자세로 역산, 실물 뜨기에서 확인 (120·130보다 잘 맞음) |
+| `apply_putty_plane.py` | `START_CONTACT` | (819.41, -15.52, 27.20) | 날 끝이 벽에 닿는 점 (20° 시작 자세 실측) |
+| | `STROKE_END_Z` | 206 | 도포 끝 날 끝 Z |
+| | `BLADE_START/END_ANGLE_DEG` | 20 / 40 | 벽과 헤라 사이 각도. 위로 갈수록 키워 팔꿈치 특이점 회피 |
+| | `PRESS_FORCE_N` | 3 | +X 목표 힘 |
+| | `WALL_APPROACH_Z` | 200 | 벽 앞 자세 정렬 높이 (245는 J3 39°로 특이점) |
+| `putty_geometry.py` | `BLADE_REFERENCE_ABC` | (-43.69, -179.38, 136.56) | 퍼티 면이 +X를 보는 TCP 자세 = 집기 자세를 Z로 180° |
+| `return_spatula.py` | `PLACE_CONTACT_FORCE_N` | 5 | 바닥 감지 힘 (CLI `--contact-force`) |
+| | `PLACE_STIFFNESS` Z | 1000 | 바닥 탐색 중 Z 강성 |
+| `putty_motion.py` | `PREFLIGHT_J3_MIN_DEG` / `J5` | 41 / 10 | 관절 검사 기준 |
+| `../config/robot.yaml` | `force.putty_scrape` | | 팀 Process 경로의 도포 설정 (목표 3 N, X 강성 200 등) |
+
+> [!WARNING]
+> 아래는 **실물로 아직 검증하지 않은** 값·가정입니다.
+> - `START_CONTACT`: 헤라 방향 기준값을 바꾸면서 같은 날 끝 점의 시작 TCP가 약 +4 mm(X) 달라졌고,
+>   새 보관대에서 헤라 쥐는 깊이도 달라졌을 수 있습니다. 다시 확인이 필요합니다.
+> - 반납 바닥 감지 5 N / Z 강성 1000은 도포의 바닥 탐색 값을 가져온 것입니다.
+> - 헤라 폭 100 mm, 두께 6 mm, 뜨기 기준점이 용기 Y 가운데라는 가정.
+> - 벽 앞 movej에서 J6가 도는 방향(+180° / -180°)은 실물 ikin 결과로 정해집니다.
+
+## 테스트
+
+로봇 없이 가짜 서비스로 경로·검사·호출 순서를 확인합니다.
 
 ```bash
-ros2 run rokey1 scoop_putty --execute-motion --path taught \
-  --scoop-angle 45 --entry-height 120 --lift 120
+cd ~/ws_cobot_pjt/ws_dsr/src/rokey1_ws
+python3 -m pytest -q $(ls test/test_*.py | grep -v "copyright\|flake8\|pep257")
 ```
 
-real에서는 보정 TCP와 추정 기준각을 먼저 출력하고 헤라 파지 확인 `y`를 받은 뒤 이동합니다.
-자동 파지 감지는 아닙니다. 각 이동 후 XYZ 2 mm / 자세 2° 이내 도착을 확인합니다.
-접촉력·충돌·IK는 검증하지 않습니다. `--reference-blade-angle`은 현재 측정 ABC의
-기준 기울기이고 목표각이 아닙니다. 측정 자세를 다시 잡으면 이 기준도 다시 맞춰야 합니다.
-`--apply-after`는 측정 모드에서 허용하지 않으며 도포/반납 실물 차단은 유지합니다.
-전체 가상 런치는 기존 경로 보존을 위해 명시적으로 `--path geometry`를 사용합니다.
+2026-11-19 기준 189개 통과. 실물 접촉 성능·정지 거리·충돌은 검증하지 않습니다.
 
-## 평면 도포 기울기 변화
+## 문제 해결
 
-`apply_putty_plane`은 시작 `--blade-angle` (기존 기본 45°)에서
-종료 `--blade-end-angle` (30°)까지 부드럽게 기울기를 바꿉니다.
-`--samples` (21개)마다 날 기준점과 회전 행렬을 계산하고 TCP XYZ/ABC를 보정합니다.
-지정한 날 접촉점들은 원래 도포 선과 면 위에 유지됩니다. 샘플 사이 실제 경로·접촉력은
-별도 검증이 필요합니다. 도포 목표들은 한 번의 MoveSplineTask로 실행합니다.
-면 접근은 시작각, 도포 후 법선 후퇴는 종료각을 유지합니다.
-동일 각도로 바르려면 두 각도를 같은 값으로 명시합니다.
-전체 launch의 plane 케이스에서도 `blade_end_angle:=30`을 전달할 수 있습니다.
+| 증상 | 확인할 것 |
+|---|---|
+| `Waiting for service …` 반복 | bringup이 떠 있는지, `ROS_DOMAIN_ID`·디스커버리 서버 설정이 같은지 |
+| 클라이언트 "퍼티 액션 서버가 없습니다" | 서버 터미널과 클라이언트 터미널의 통신 설정, `ros2 action list` |
+| "이미 이 PC/ROS domain에서 퍼티 액션 서버가 실행 중" | `pgrep -af putty_task_server`로 남은 서버 확인 |
+| `[관절 검사] … 특이점 근처` / `손목이 반대로 꺾이는 해` | 로그의 관절값 확인. 경유 자세 추가 또는 좌표 재확인 |
+| `반시계/시계 J1 회전량 … 벗어났습니다` | 시작 자세가 예상과 다름 (예: 집기는 홈에서 시작해야 함) |
+| 충돌 감지 7060 / 3501 | 위치제어로 바닥·벽을 밀었는지. 끝점 여유·접근 높이 확인 |
+| 특이점 알람 3205 | 이송 높이·각도. `[특이점 감지]` 로그의 관절각 확인 |
 
-```bash
-# YZ 벽 하단→상단: 실제 좌표를 받은 뒤 start/end를 입력
-# --plane yz --start X Y Z_LOW --end X Y Z_HIGH
-# --blade-angle 45 --blade-end-angle 30
-```
+## 변경 이력 요약
 
-속도 기본값은 유지합니다. 현재 평면 노드는 real/virtual 실행을 허용합니다.
-
-## 측정 YZ 벽의 상향 도포 기본값
-
-단일 `plane`의 기본 작업면은 YZ이며, 접촉 시작점은 BASE 날 기준
-[784.04,-15.52,32.20] mm입니다. `end`를 생략하면 `--stroke-height` (180 mm)만큼
-+Z로 올라간 [784.04,-15.52,212.20] mm를 끝점으로 계산합니다.
-접촉점 X·Y를 유지하면서 벽 기준 기울기를 45→30°로 바꿉니다.
-TCP XYZ는 기존 날 오프셋으로 계산하므로 접촉점 좌표와 다릅니다.
-`--start`/`--end`를 직접 주면 직접 지정한 좌표를 사용합니다.
-
-
-```bash
-ros2 run rokey1 apply_putty_plane --execute-motion \
-  --stroke-height 180 --blade-angle 45 --blade-end-angle 30
-```
-
-현재 real/virtual 모두 지원합니다. positive는 +X 쪽 접근점에서 -X로 접근,
-negative는 -X 쪽 접근점에서 +X로 접근합니다. 이 YZ 벽은 negative가 기본입니다.
-모델의 장착 방향·오프셋 가정과 실제 헤라 일치, 경로 도달 및 충돌은 검증하지 않았습니다.
-
-## 팀 TCP 적용 변경 반영
-
-픽업은 현재 TCP를 조회하고 `GripperDA_v1`이 아니면 `SetCurrentTcp`로 적용한 뒤
-재조회합니다. 적용 실패나 재조회 불일치 시 이동을 시작하지 않습니다.
-이 처리는 펜던트에 이미 등록된 TCP를 선택하며 TCP 오프셋을 새로 정의하지 않습니다.
-새 집기 좌표·ABC, 속도, 회전 도착 판정, 가상 집게와 실행 요청 조건은 그대로 유지합니다.
-팀 변경에 포함된 HMI 개선(현재 위치 입력·속도 조절·홈 버튼)과 homeset 노드도 가져왔으며,
-HMI의 퍼티 가상 모드는 가짜 응답 대신 실제 가상 서비스 실행을 유지합니다.
-
-## 평면 도포의 J6 단계 제거
-
-`apply_putty_plane`은 J6 회전·J6 전용 사전 상승·관절 서비스 대기를 사용하지 않습니다.
-현재 TCP를 조회하고 평면 도포 경로의 높이 확보·자세 정렬부터 바로 진행합니다.
-평면 노드의 `--j6-delta`, `--j6-speed`, `--j6-acceleration` 옵션은 제거했습니다.
-평면 도포 시 실행 명령에서 해당 인자를 빼야 합니다.
-도포 자세 정렬과 45→30° 변화는 유지하므로 개별 관절이 고정된다는 뜻은 아닙니다.
-별도 J6 케이스는 이후 제거됐고 전체 launch도 plane만 지원합니다.
-
-## YZ 실물 벽 접근 방향 확정
-
-측정 벽은 X가 증가하는 방향으로 접근합니다. 단일 YZ plane에서 normal-sign을
-생략하면 negative (자유 공간 -X)로 설정합니다. 접근점은 접촉 TCP보다 X가 50 mm
-작고, 도포 후에는 -X로 50 mm 후퇴합니다. 다른 기존 시험 케이스는 기존 positive를 유지합니다.
-평면 도포만 real/virtual 실행을 허용하며 J6 별도 케이스의 실물 차단은 유지합니다.
-
-```bash
-ros2 run rokey1 apply_putty_plane --execute-motion
-```
-
-현재 측정 벽 시작점은 [784.04,-15.52,32.20]이며, 닫힌 그리퍼의 GripperDA_v1 TCP로
-실제 벽에 닿아 측정한 표면점임을 확인했습니다. Tool +Z 헤라 길이는 약 120 mm입니다. 실물 경로·충돌·접촉력은 검증하지 않았으며
-현재는 위치 제어이고 목표 힘(N) 제어는 없습니다.
-
-## 연속 도포 및 최신 벽 측정 반영
-
-이번 벽은 헤라 없이 닫힌 그리퍼의 GripperDA_v1 TCP로 실제 벽에 닿아 측정했습니다.
-- 측정 시작 XYZABC: [784.04,-15.52,32.20,178.14,-129.12,176.45]
-- 측정 끝 XYZABC: [787.13,-26.18,197.39,176.01,-127.98,175.61]
-- 두 점의 Z 차이: 165.19 mm. 사용자 지정 벽 높이/도포 길이는 180 mm.
-
-정확한 +Z 상향 도포를 위해 시작점의 X=784.04, Y=-15.52를 고정하고
-Z=32.20→212.20 mm로 경로를 계산합니다. 측정 끝점의 XYZABC는 경로 끝점으로 직접 쓰지 않습니다.
-이 ABC는 헤라가 없는 벽 측정 자세이며, 퍼티 도포 ABC로 고정하지 않습니다.
-헤라 길이는 사용자 확인에 따라 Tool [0,0,120] mm로 보정합니다. BASE -Z에 120을
-상수로 더하거나 빼지 않고 각 시점의 회전 행렬로 변환한 오프셋을 뺍니다.
-헤라 면/폭 장착 방향의 기존 모델 가정은 여전히 적용되므로 실물 일치는 별도 확인해야 합니다.
-
-각도는 공간 진행률 u에 대해 `45+(30-45)*u³`입니다.
-중간 높이(u=0.5)에서 43.125°, 끝에서 30°이며 초반 완만·후반 빠른 변화입니다.
-한 도포 구간의 시작점 포함 21개 TCP 자세를 MoveSplineTask 한 요청으로 보냅니다.
-기존 점별 MoveLine 완료 대기와 중간 좌표 조회로 발생하는 정지를 제거했습니다.
-접근/후퇴는 기존 MoveLine을 유지하며 두 구간 사이 후퇴는 합치지 않습니다.
-스플라인 완료 후 끝점 오차를 검사하고, 실패 시 후퇴를 포함한 다음 요청을 보내지 않습니다.
-컨트롤러의 스플라인 보간에 따른 실제 접촉점 편차/속도는 실물 검증 전입니다.
-도포 samples 범위는 드라이버의 MAX_SPLINE_POINT=100에 맞춰 2~100입니다.
-
-```bash
-source install/setup.bash
-ros2 run rokey1 apply_putty_plane --execute-motion
-```
-
-기존 이송/도포 속도 및 가속도 값은 유지했습니다. J6 회전은 없습니다.
-힘 제어가 아닌 위치 제어이므로 실제 접촉력이나 벽 접촉 유지가 자동 보장되지는 않습니다.
-
-## 벽 위치 소량 보정
-
-사용자 요청으로 기본 접촉 경로 전체를 BASE X +5 mm / Z -5 mm 이동했습니다.
-원 측정점 [784.04,-15.52,32.20]은 기록으로 유지하며, 실행 시작점은
-[789.04,-15.52,27.20], 끝점은 [789.04,-15.52,207.20] mm입니다.
-도포 길이 180 mm, Y, 각도 변화, 속도, Tool 오프셋은 유지했습니다.
-이 보정은 위치 보정이며 힘 제어 또는 접촉 검증을 의미하지 않습니다.
-
-## 도포 전 −Z / +X 접촉 탐색
-
-`--contact-search` 옵션은 기본 위치까지 기존 경로로 이동한 뒤,
-−Z 바닥 탐색 → 힘 변화 감지·정지 → +X 벽 탐색 → 힘 변화 감지·정지 → 도포 순서로 실행합니다.
-각 탐색은 시작 시 BASE 외력을 읽고 해당 축 외력 변화의 절댓값을 N 단위로 비교합니다.
-힘 기준값은 `--floor-force`와 `--wall-force`에 반드시 입력해야 하며 기본값은 없습니다.
-입력 누락·오류이면 ROS 초기화나 이동 전에 종료합니다.
-
-사용자가 지정한 축별 최대 거리 기본값은 20 mm, 탐색 속도 기본값은 2 mm/s입니다.
-속도·거리는 `--search-speed`/`--search-distance`로 명시할 수 있습니다.
-접촉 탐색은 유한 거리 비동기 MoveLine 중 BASE 외력을 조회하고 감지 시 MoveStop(HOLD)을
-호출합니다. STANDBY가 확인된 다음에만 다음 단계를 진행합니다.
-거리 안에서 미감지, 시간 초과, 센서 오류, 서비스 실패 시 정지를 시도하고 도포는 생략합니다.
-두 접촉 확인 후 실제 정지 TCP와 기존 접촉 TCP의 차이만큼 남은 도포·후퇴 경로를 이동합니다.
-+Z 도포 길이·각도 변화·연속 스플라인 방식·도포 속도는 유지합니다.
-
-이것은 힘 감시 기반 접촉 탐색이며 목표 힘 유지/컴플라이언스 제어가 아닙니다.
-현재는 단일 YZ 벽 +X 접근, X/Y 고정 상향 도포에서만 지원합니다.
-실물 접촉 성능·안전 정지 거리·힘 센서 오차는 검증 전입니다.
-힘을 적용하기 전에 정지 상태에서 현재 외력값을 조회할 수 있습니다:
-
-```bash
-ros2 service call /dsr01/dsr_controller2/aux_control/get_tool_force \
-  dsr_msgs2/srv/GetToolForce '{ref: 0}'
-```
-
-실행 시 기존 명령에 `--contact-search --floor-force <확인한_N> --wall-force <확인한_N>`을
-추가합니다. 예시 N 값을 임의 기본값으로 사용하지 않습니다.
-
-## 도포 중 BASE +X 2.3 N 유지
-
-접촉 탐색 성공 후에도 도포 중 벽을 누르도록 연결했습니다.
-`--contact-search`를 사용하면 바닥·벽 탐색 성공 후 컴플라이언스와 X축 목표 힘 제어를
-시작합니다. 기본 유지 힘은 사용자가 지정한 2.3 N (`--press-force`)입니다.
-벽 탐색 기준 `--wall-force`와 도포 유지 목표 `--press-force`는 별개입니다.
-BASE 힘 벡터 [2.3,0,0,0,0,0], 방향 마스크 [1,0,0,0,0,0], 절대 힘 모드(0)를 사용합니다.
-기존 접촉력에 2.3 N을 더하는 상대 모드가 아닙니다.
-컴플라이언스 강성은 드라이버의 기본값 [3000,3000,3000,200,200,200]이며
-`--force-stiffness`로 지정할 수 있습니다. 좌표·도포 속도·각도 곡선은 변경하지 않았습니다.
-
-도포 스플라인은 비동기로 실행하며 BASE 외력 데이터와 현재 자세·상태를 감시합니다.
-X는 힘 제어에 맡겨 목표 X 좌표와의 오차로 완료 여부를 판정하지 않습니다.
-Y/Z와 각도는 기존 오차 기준으로 확인합니다. 각도 변경에 필요한 정상 TCP X 이동을
-고려하여, 현재 Y/Z에 가장 가까운 계획점의 X에서 search-distance (기본 20 mm)를
-초과하는 편차가 나면 정지·해제 후 중단합니다.
-완료 후 목표 힘→컴플라이언스 순서로 해제하고 실제 X 위치를 기준으로 -X 후퇴합니다.
-오류·타임아웃·Ctrl+C 시에는 정지를 시도한 뒤 힘/컴플라이언스 해제를 모두 시도합니다.
-해제 실패 시 후퇴를 포함한 다음 이동을 진행하지 않습니다.
-
-기존에 성공한 접촉 탐색 명령의 floor-force/wall-force 값을 유지하고,
-필요하면 `--press-force 2.3`을 명시합니다. contact-search를 생략하면 기존 위치 제어입니다.
-2.3 N 감지에 성공한 사실이 2.3 N 목표 유지 성능을 보장하지는 않습니다.
-컨트롤러가 목표 힘을 거부하면 중단하며 임의로 더 큰 힘을 재시도하지 않습니다.
-실물 힘 유지/벽 접촉 성능은 아직 실행 검증하지 않았습니다.
-
-## 최신 동작: 추가 접근 제거·6 N 출발 확인·도포 중 감시
-
-순서: −Z 바닥 감지 → +X 벽 감지 → 정지 상태에서 컴플라이언스와 +X 6 N 설정
-→ 실측 힘 안정 확인 → 45→30° 선형 각도 변화로 180 mm 상향 도포.
-벽 감지 후 강제로 +X 몇 mm를 더 이동하던 함수와 `--extra-approach` 옵션은 삭제했습니다.
-접촉 시작점의 기존 X +5 / Z −5 좌표 보정과 Tool 오프셋 기하 보정은 유지합니다.
-
-새 실측 감시 기준은 다음과 같습니다. 물리적 유지 정확도는 실물 검증 전입니다.
-
-- `--press-force 6`: 기존 BASE +X 절대 목표 힘. 감지 기준에 더하는 상대 모드가 아닙니다.
-- `--force-tolerance 1`: |BASE Fx|가 5~7 N 범위일 때 정상 판정.
-- `--force-stable-time 0.5`: 같은 실측 부호로 범위 안에서 0.5초 이상·3회 이상 확인 후 출발.
-- `--force-wait-timeout 30`: 30초 내 출발 조건 미충족 시 정지·해제, 상승하지 않음.
-- `--force-loss-timeout 0.5`: 도포 중 5 N 미만이 0.5초 지속되면 정지·해제.
-- 7 N 초과, 안정 후 반대 부호의 5~7 N, 센서 오류, 비정상 로봇 상태도 중단.
-- 힘 형성 중 벽 감지 위치에서 X 이동 한도는 기존 `--search-distance 20` mm,
-  YZ 위치 변화 한도는 기존 도착 허용 오차인 2 mm입니다.
-
-명령은 항상 BASE +X입니다. 측정은 반력 부호를 단정하지 않고 |Fx|로 크기를 확인하되
-원래 부호를 로그에 남깁니다. 출발 시 실측 부호를 고정해 도포 중 반전을 감시합니다.
-이 판정은 툴 무게·무게중심 설정 오차나 정확한 접촉 위치까지 검증하지 않습니다.
-힘 조절은 컨트롤러가 계속 수행하며, Python은 서비스 조회 주기마다 상태를 감시합니다.
-즉 이 감시는 실시간 보호 기능이 아니며 샘플 사이의 편차까지 보장하지 않습니다.
-별도 소프트웨어 위치 보정이나 힘 증가는 수행하지 않습니다.
-
-출발점은 힘 형성 후 실제 TCP로 다시 정렬합니다. 도포 중 X는 힘 제어에 맡기고,
-Y/Z와 자세는 기존 스플라인으로 추종합니다. 강성 [3000,3000,3000,200,200,200]은 유지합니다.
-끝점까지 힘 명령을 유지한 뒤 해제하고 실제 X에서 −X 후퇴합니다.
-실패 시 정지·힘/컴플라이언스 해제를 시도하며 자동 후퇴나 재시도는 하지 않습니다.
-접촉 탐색 옵션을 빼면 기존 위치 제어로 동작합니다.
-
-## 독립 도포 노드 정리
-
-사용자 요청으로 apply_putty.py / apply_putty_j6.py는 삭제했습니다.
-좌표·각도·속도·접촉 탐색·6 N 힘 유지 설정은 유지하고 공통 함수만 내부 모듈로 옮겼습니다.
-전체 launch의 도포 케이스 선택 옵션은 제거했습니다.
-기존 전체 launch의 나머지 좌표·속도 설정은 바꾸지 않았으므로 현재 실물 벽 작업에는
-위 단독 평면 도포 명령을 사용합니다. 독립 J6 테스트도 제거했습니다.
-
-## 코드 역할과 통신 읽는 순서
-
-실행 노드: initialize_device(초기화), pickup_spatula(집기), scoop_putty(찍기),
-apply_putty_plane(도포), return_spatula(반납)입니다.
-공통 모듈 contact_search / putty_geometry / putty_motion은 따로 실행하는 ROS 노드가 아닙니다.
-
-평면 도포를 읽을 때는 다음 순서가 이해하기 쉽습니다.
-1. apply_putty_plane.main: 옵션 검증과 실행 시작
-2. surface_frame / stroke_poses / application_moves: 날 경로와 TCP 경로 계산
-3. putty_motion.run_robot: 노드 생성과 ROS 서비스 통신
-4. contact_search.seek_floor_then_wall: io 함수를 재사용해 접촉 탐색
-5. WallForceHold 및 putty_motion의 스플라인 실행: 힘 설정과 상향 도포
-
-모듈끼리는 일반 Python import/함수 호출입니다. ROS 토픽이나 Action을 주고받지 않습니다.
-각 실행 노드는 /dsr01/dsr_controller2 아래 ROS 2 서비스를 호출합니다.
-DSR 서비스 서버는 dsr_msgs2 요청을 받아 DRFL API를 호출해 로봇 컨트롤러로 전달합니다.
-가상 집게는 별도 /onrobot/sendCommand 서비스(onrobot_rg_msgs/srv/SetCommand)를 사용합니다.
-실물 초기화/픽업의 집게 제어는 컨트롤박스 DO 1·2번 서비스를 사용합니다.
-
-주요 서비스 인터페이스:
-- GetCurrentPosx / GetCurrentPosj: 현재 TCP XYZABC / 관절각 조회
-- GetCurrentTcp / SetCurrentTcp: 등록된 TCP 선택 상태 조회 / 변경
-- MoveJoint: 관절 좌표 이동 (홈)
-- MoveLine: TCP 직선 이동 (접근, 탐색, 후퇴)
-- MoveSplineTask: 여러 TCP 자세를 하나의 연속 도포로 실행
-- GetToolForce / MoveStop / GetRobotState: 외력 조회 / 정지 요청 / 정지 확인
-- TaskComplianceCtrl / SetDesiredForce: 컴플라이언스 / 목표 힘 설정
-- ReleaseForce / ReleaseComplianceCtrl: 목표 힘 / 컴플라이언스 해제
-
-call_async는 서비스 요청을 보내고 Future를 반환합니다. 이어지는 spin으로 응답을 기다립니다.
-이 Python 전송 방식과 이동 요청의 sync_type(로봇 동작 완료 대기 여부)은 다른 개념입니다.
-GetToolForce 조회 성공과 목표 힘 유지 성공은 같지 않습니다. 현재는 상승 전 실측 힘 안정 대기와 도포 중 감시를 수행합니다.
-
-launch는 PuttyTask 결과를 받은 ActionClient의 종료 코드를 확인한 뒤 다음 Goal을 보냅니다.
-HMI는 직접 ActionClient로 결과·피드백을 받습니다. 내부 작업 노드의 서비스 호출 구조는 유지합니다.
-전체 공정은 가상 전용이며 현재 실물 벽 도포와 구분해야 합니다.
+- **2026-11-19**
+  - 11-18 인수인계본의 도포 수정 반영: Tool Weight 선택, 바닥 탐색부터 컴플라이언스, direct 누르기,
+    X 강성 200 + 3 N 상대 힘, MoveLine 20구간, `check_motion` 완료 판정, 출발 전 ikin 관절 검사, 10 N 하한 제거.
+  - 보관대를 로봇 뒤쪽으로 이동: 집기·반납을 반시계 movej로, 반납은 바닥 힘 감지로 변경, 실물 반납 허용.
+  - 퍼티 뜨기를 새 용기 위치·-X 진입 방식으로 변경(추정 기준각 60° 제거).
+  - 헤라가 반대로 쥐어지므로 도포 기준값을 180° 뒤집고, 벽 앞 이동을 시계 방향 movej로 변경.
+  - 정리: `service_waiter.py`, 예전 가상 geometry 경로와 `putty_cycle.launch.py` 삭제.
+- **2026-11-18 이전**: 단일 YZ 벽 상향 도포, 접촉 탐색, 특이점 감시, PuttyTask/Process 액션 서버 도입.

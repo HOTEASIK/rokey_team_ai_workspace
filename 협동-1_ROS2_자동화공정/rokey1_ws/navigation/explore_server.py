@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""/process/explore 액션 서버: wall_tap 으로 벽을 재고 결과를 Process 양식으로 돌려준다.
+"""/process/explore 액션 서버: pick_tap(물건 집기 → wall_tap → 반납) 으로 벽을 재고 결과를 Process 양식으로 돌려준다.
 
-  hmi_server(process_runner) ─goal→ explore_server ─ros2 run→ wall_tap (자식 프로세스, 기존 코드 그대로)
+  hmi_server(process_runner) ─goal→ explore_server ─ros2 run→ pick_tap (자식 프로세스, 결과 파일은 wall_tap 과 같음)
                              ←result (wall[12], gaps)── ~/wall_scan_data/explore_run<id>_*.json 읽기
 
   wall     : top / floor / right / left 각 [x,y,z] (BASE mm). 벽 표면 위, 높이·너비 측정선 기준
@@ -18,6 +18,8 @@
 """
 import json
 import os
+import signal
+import threading
 import statistics
 import time
 from datetime import datetime
@@ -27,6 +29,7 @@ from rclpy.action import ActionServer, CancelResponse, GoalResponse
 from rclpy.callback_groups import ReentrantCallbackGroup
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
+from rclpy.signals import SignalHandlerOptions
 from dsr_msgs2.srv import MoveStop, ReleaseComplianceCtrl, ReleaseForce
 from rokey_interfaces.action import Process
 
@@ -78,6 +81,7 @@ class ExploreServer(Node):
         super().__init__('explore_server')
         self.mode = self.declare_parameter('mode', 'virtual').value
         self.busy = False
+        self.worker = None   # 실행 중 wall_tap (서버가 꺼질 때 같이 끄려고)
         cb = ReentrantCallbackGroup()
         ctrl = f'/{ROBOT_ID}/dsr_controller2'
         self.cli = {key: self.create_client(srv, f'{ctrl}/{name}', callback_group=cb) for key, srv, name in (
@@ -99,9 +103,10 @@ class ExploreServer(Node):
     def _run(self, gh):
         run_id = gh.request.run_id
         out = os.path.join(SAVE_DIR, f'explore_run{run_id}_{datetime.now():%Y%m%d_%H%M%S}.json')
-        worker = WorkerProcess(['ros2', 'run', 'rokey1', 'wall_tap', '--ros-args',
+        worker = WorkerProcess(['ros2', 'run', 'rokey1', 'pick_tap', '--ros-args',
                                 '-p', f'mode:={self.mode}', '-p', 'confirm:=false', '-p', 'rviz:=false',
                                 '-p', f'out:={out}', '-p', f'tag:=run{run_id}'])
+        self.worker = worker
         limit = float(CFG['explore']['timeout_sec'])
         t0 = time.time()
         while worker.poll() is None:
@@ -164,17 +169,27 @@ class ExploreServer(Node):
 
 
 def main(args=None):
-    rclpy.init(args=args)
+    # 서버가 꺼질 때도 정지 명령을 보낼 수 있게 ROS 연결을 먼저 끊지 않는다 (SIGINT·SIGTERM → KeyboardInterrupt)
+    rclpy.init(args=args, signal_handler_options=SignalHandlerOptions.NO)
+    signal.signal(signal.SIGTERM, signal.default_int_handler)
     node = ExploreServer()
+    executor = MultiThreadedExecutor()
+    executor.add_node(node)
     try:
-        rclpy.spin(node, executor=MultiThreadedExecutor())
+        while rclpy.ok():
+            executor.spin_once(timeout_sec=0.1)   # spin() 은 이벤트가 올 때까지 신호를 못 받아 정지가 몇 분 늦었음
     except KeyboardInterrupt:
         pass
     finally:
+        # 탐색 중이면: 다음 명령 막기 → 로봇 즉시 정지 → wall_tap 종료 → 힘/순응 해제 (wall_tap 은 별도 세션이라 안 하면 고아로 남음)
+        if node.worker and node.worker.poll() is None:
+            node.get_logger().warn('서버 종료: 실행 중인 탐색을 멈춥니다.')
+            threading.Thread(target=executor.spin, daemon=True).start()   # 정지 서비스 응답 받기용
+            node._abort(node.worker)
+        executor.shutdown()
         node.destroy_node()
         if rclpy.ok():
             rclpy.shutdown()
-
 
 if __name__ == '__main__':
     main()

@@ -38,3 +38,12 @@ def test_failed_set_aborts_with_pendant_hint():
 def test_successful_set_but_wrong_readback_aborts():
     with pytest.raises(RuntimeError, match='적용 후에도'):
         ensure_tcp(lambda: 'other_tcp', lambda name: None, lambda message: None)
+
+
+def test_nearest_turn_handles_small_ccw_from_home_and_cw_from_behind():
+    from putty_demo.pickup_spatula import turn_joint_target
+    rest = (0.0,)*5
+    # run102: 홈(J1 0.2)에서 Y=120 틈(J1 +11.4) — 'cw' 고정이면 348.8° 로 멈췄다
+    assert turn_joint_target((0.2, *rest), (11.4, *rest), 'nearest')[0] == 11.4
+    assert turn_joint_target((163.6, *rest), (-5.0, *rest), 'nearest')[0] == -5.0
+    assert turn_joint_target((163.6, *rest), (9.7, *rest), 'nearest')[0] == pytest.approx(9.7)

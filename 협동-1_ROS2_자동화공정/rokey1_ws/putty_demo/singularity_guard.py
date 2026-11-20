@@ -5,6 +5,7 @@
 컨트롤러의 SINGULARITY_ERROR 정책을 함께 설정해 힘 제어 진입도 검사한다.
 """
 
+import math
 import threading
 import time
 
@@ -58,13 +59,29 @@ class SingularityWatch:
         self.failure = None
         self.last_spin = time.monotonic()
         self.subscription = self.node.create_subscription(RobotError, self.topic, self._alarm, 100)
+        # 특이점 알람 순간의 6축 관절각을 함께 남기기 위해 joint_states도 구독한다.
+        from sensor_msgs.msg import JointState
+        self.joints = None
+        self.joint_subscription = self.node.create_subscription(
+            JointState, f'/{robot_id}/joint_states', self._joint_state, 10)
         self.executor = SingleThreadedExecutor(context=self.node.context)
         self.executor.add_node(self.node)
         self.thread = threading.Thread(target=self._spin, daemon=True)
         self.thread.start()
 
+    def _joint_state(self, message):
+        if len(message.position) >= 6:
+            self.joints = tuple(round(math.degrees(p), 2) for p in message.position[:6])
+
+    def joint_text(self):
+        if self.joints is None:
+            return '관절각 미수신'
+        return ' '.join(f'J{i+1}={v:.1f}' for i, v in enumerate(self.joints))
+
     def _alarm(self, message):
         if self.latch.observe(message):
+            # 알람 순간 관절각을 사유에 붙여 HMI/결과 메시지에서도 바로 보이게 한다.
+            self.latch.reason += f' | 알람 시 관절각 [{self.joint_text()}]'
             self.node.get_logger().error(f'[특이점 감지] {self.latch.reason}')
 
     def _spin(self):

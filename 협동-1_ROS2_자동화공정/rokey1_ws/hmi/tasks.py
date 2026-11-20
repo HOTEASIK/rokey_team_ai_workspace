@@ -86,25 +86,62 @@ GAP_PARAM = _p('gap_id', '틈 번호 (gap_id)', 'number', '', min_=1, integer=Tr
                help_='DB gap 테이블의 번호 (1 이상 정수). 탐색(EXPLORE/전체 공정) 로그에 찍힌 gap_id 를 매번 넣는다')
 
 
+# [전체 공정] 시작 단계: 0 처음부터(탐색) → 1 내부 탐색 → 2 퍼티 → 3 샌딩
+#   1 이상이면 벽 탐색을 건너뛰고 DB 의 마지막 벽(wall)과 그 틈(gap)을 쓴다.
+START_STAGES = ('0: 처음부터 (탐색)', '1: 내부 탐색부터', '2: 퍼티 작업부터', '3: 샌딩 작업부터')
+STAGE_PARAM = _p('start_stage', '시작 단계', 'select', START_STAGES[0], START_STAGES,
+                 help_='0 = 벽 탐색부터 전부. 1~3 = 벽 탐색을 건너뛰고 DB 의 마지막 벽/틈으로 그 단계부터 진행 '
+                       '(1 내부 탐색은 아직 기능 없음 → robot.yaml inner_explore.enabled 가 false 면 건너뜀)')
+
+
+def start_stage(params):
+    """'2: 퍼티 작업부터' → 2 (없으면 0)"""
+    return int(str((params or {}).get('start_stage') or '0').split(':')[0])
+
+
+def process_actions(process, params=None):
+    """공정에 필요한 /process/* 액션 (시작 단계에 따라 앞 단계 서버는 필요 없음)"""
+    if process != 'ALL':
+        return PROCESS_ACTIONS[process]
+    stage = start_stage(params)
+    return (('EXPLORE',) if stage == 0 else ()) + (PUTTY_ACTIONS if stage <= 2 else ()) + ('SANDING',)
+
+
 def _db_task(process, label, desc, params):
     return {'id': f'process_{process.lower()}', 'group': 'process', 'kind': 'db', 'process': process,
             'label': label, 'desc': desc, 'params': params, 'build': None, 'motion': lambda mode: True}
 
 
+# ----------------------------------------------------------------------------- bringup ([sodvir]/[sodreal] 버튼)
+ROBOT_HOST = {'virtual': '127.0.0.1', 'real': '192.168.1.100'}   # ~/.bashrc 의 sodvir / sodreal 과 같은 값
+# 공정 ▶ 시작 때 필요한 /process/* 액션과, 그 액션을 제공하는 서버 (없으면 HMI 가 켠다)
+PUTTY_ACTIONS = ('PUTTY_PICKUP', 'PUTTY_SCOOP', 'PUTTY', 'PUTTY_RETURN')
+PROCESS_ACTIONS = {'EXPLORE': ('EXPLORE',), 'PUTTY': PUTTY_ACTIONS, 'SANDING': ('SANDING',),
+                   'ALL': ('EXPLORE', *PUTTY_ACTIONS, 'SANDING')}
+ACTION_SERVER = {'EXPLORE': 'explore_server', 'SANDING': 'tool_task_server',
+                 **{a: 'putty_task_server' for a in PUTTY_ACTIONS}}
+
+
+def _bringup(mode, p):
+    return [['ros2', 'launch', 'm0609_rg2_bringup', 'bringup.launch.py', f'mode:={mode}',
+             f'host:={ROBOT_HOST[mode]}', 'port:=12345', 'model:=m0609']]
+
+
 # ----------------------------------------------------------------------------- 카탈로그
 TASKS = [
     # ===== 공정 (DB 기록) =====
-    _db_task('ALL', '전체 공정', '탐색 → 찾은 틈마다 퍼티 → 샌딩. 결과는 DB(run/wall/gap/task_log)에 저장.',
-             DB_PARAMS),
+    _db_task('ALL', '전체 공정', '탐색 → 내부 탐색 → 찾은 틈마다 퍼티 → 샌딩. 결과는 DB(run/wall/gap/task_log)에 저장. '
+                                 '[시작 단계] 1~3 은 DB 의 마지막 벽/틈으로 그 단계부터 진행.',
+             [STAGE_PARAM] + DB_PARAMS),
     _db_task('EXPLORE', '탐색', '/process/explore 만 실행. 찾은 벽/틈을 DB에 저장.', DB_PARAMS),
-    _db_task('PUTTY', '퍼티', '지정한 gap_id 한 틈에 /process/putty 실행.', [GAP_PARAM] + DB_PARAMS),
+    _db_task('PUTTY', '퍼티', '지정한 gap_id 한 틈에 헤라 집기 → 뜨기 → 도포 → 반납.', [GAP_PARAM] + DB_PARAMS),
     _db_task('SANDING', '샌딩', '지정한 gap_id 한 틈에 /process/sanding 실행.', [GAP_PARAM] + DB_PARAMS),
 
     # ===== NAVIGATION =====
     {
         'id': 'explore_server', 'group': 'navigation', 'kind': 'service',
         'label': '탐색 액션 서버',
-        'desc': '/process/explore 액션 서버 (wall_tap 실행 → 벽/틈을 DB 로). [공정(DB)] 탐색·전체 공정 전에 먼저 시작.',
+        'desc': '/process/explore 액션 서버 (wall_tap 실행 → 벽/틈을 DB 로). [공정] 시작 때 없으면 자동으로 켜짐.',
         'params': [],
         'build': lambda mode, p: [_run('explore_server', *_ros_params(mode=mode))],
         'motion': lambda mode: False, 'mode_bound': True,
@@ -141,8 +178,8 @@ TASKS = [
     {
         'id': 'putty_task_server', 'group': 'putty', 'kind': 'service',
         'label': '퍼티 액션 서버',
-        'desc': '/process/putty, /process/putty_load, /dsr01/putty_task 액션 서버. '
-                '[공정(DB)] 퍼티 전에 먼저 시작 (virtual 이면 가상 그리퍼).',
+        'desc': '/process/putty_pickup · putty_scoop · putty · putty_return, /dsr01/putty_task 액션 서버. '
+                '[공정] 시작 때 없으면 자동으로 켜짐 (virtual 이면 가상 그리퍼).',
         'params': [],
         'build': lambda mode, p: [_run('putty_task_server', *_ros_params(process_virtual_mode=mode != 'real'))],
         'motion': lambda mode: False, 'mode_bound': True,
@@ -153,9 +190,10 @@ TASKS = [
         'id': 'tool_task_server', 'group': 'sanding', 'kind': 'service',
         'label': '샌딩 액션 서버',
         'desc': '/dsr01/tool_task + /process/sanding 액션 서버 (sanding_server). '
-                '[샌딩 작업 실행]·[공정(DB)] 샌딩 전에 먼저 시작 (RG2 /onrobot 필요).',
+                '[샌딩 작업 실행] 전에 시작 · [공정] 시작 때는 자동으로 켜짐 (RG2 = 디지털 출력, robot.yaml sanding.gripper).',
         'params': [],
-        'build': lambda mode, p: [_run('tool_task_server')], 'motion': lambda mode: False,
+        'build': lambda mode, p: [_run('tool_task_server', *_ros_params(virtual=mode != 'real'))],
+        'motion': lambda mode: False, 'mode_bound': True,
     },
     {
         'id': 'sanding_goal', 'group': 'sanding', 'kind': 'action',
@@ -173,7 +211,14 @@ TASKS = [
         'build': None, 'motion': lambda mode: True,
     },
 
-    # ===== SYSTEM (탭에는 안 보이고 [홈 위치로 이동] 버튼이 사용) =====
+    # ===== SYSTEM (탭에는 안 보이고 [홈 위치로 이동] / [sodvir]·[sodreal] 버튼이 사용) =====
+    {
+        'id': 'bringup', 'group': 'system', 'kind': 'service',
+        'label': '로봇 bringup',
+        'desc': 'm0609_rg2_bringup (sodvir/sodreal 과 같은 명령). 전체 정지·비상 정지로는 꺼지지 않음.',
+        'params': [], 'build': _bringup,
+        'motion': lambda mode: False, 'mode_bound': True, 'keep_on_stop': True,
+    },
     {
         'id': 'homeset', 'group': 'system', 'kind': 'process',
         'label': '홈 위치로 이동',

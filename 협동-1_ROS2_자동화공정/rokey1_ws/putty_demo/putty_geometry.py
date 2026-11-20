@@ -8,24 +8,20 @@
 
 import math
 
-from .pickup_spatula import PICKUP_ABC
+# 헤라 방향 계산의 기준 자세(TCP ABC, deg).
+# 뜻: TCP가 이 자세일 때 쥔 헤라가 '퍼티 면 = BASE +X, 날 선 = BASE Y, 손잡이 = 위(+Z)'가 된다.
+# 도포 경로(apply_putty_plane.surface_frame)는 이 관계를 이용해 원하는 헤라 방향 → TCP 자세를 계산한다.
+#
+# 2026-11-19 보관대를 로봇 뒤로 옮기면서 헤라가 반대로 쥐어져, 집기 자세(pickup_spatula.PICKUP_ABC)에서
+# 퍼티 면이 -X를 본다. 그래서 집기 자세를 BASE Z축으로 180° 돌린 자세가 기준이다(ZYZ에서 A+180°).
+# 결과적으로 도포 자세는 예전보다 손목(J6)이 약 180° 돌아간 자세가 되고, 퍼티 면이 +X 벽을 향한다.
+BLADE_REFERENCE_ABC = (136.31+180.0-360.0, -179.38, 136.56)   # = (-43.69, -179.38, 136.56)
 
-START_XY = (695.42, -223.46)
-END_XY = (574.26, -227.09)
-START_TILT, END_TILT = 45.0, 30.0
-UP = (0.0, 0.0, 1.0)
-BLADE_WIDTH, BLADE_LENGTH, BLADE_THICKNESS = 100.0, 70.0, 6.0
-HANDLE_RADIUS = 4.0
-SURFACE_Z = 35.0
-EDGE_OFFSET = (0.0, 0.0, 126.0)
-SAMPLES = 21
+BLADE_WIDTH, BLADE_THICKNESS = 100.0, 6.0   # 헤라 날 폭·두께 mm (실측 전 가정값)
+SAMPLES = 21                # 각도 변화 도포 경로의 자세 개수
 from utils.robot import ROBOT_ID, TCP_NAME  # config/robot.yaml robot 섹션
 EXPECTED_TCP = TCP_NAME
-TRANSFER_Z = 245.14
-
-
-def translate(point, direction, distance):
-    return tuple(p + d * distance for p, d in zip(point, direction))
+TRANSFER_Z = 245.14         # 공용 이송 높이(TCP Z) mm
 
 
 def cross(a, b):
@@ -64,47 +60,8 @@ def axes_to_zyz(axes):
                                     math.atan2(y[2], -x[2]))))
 
 
-def build_stroke(surface_z, edge_offset, samples, pickup_abc=PICKUP_ABC, normal_x=-1.0):
-    """픽업 면 법선 BASE ±X를 Y축 회전으로 -Z 쪽으로 눕힌다."""
-    length = math.dist(START_XY, END_XY)
-    travel = (*((end - start) / length for start, end in zip(START_XY, END_XY)), 0.0)
-    initial_axes = zyz_axes(pickup_abc)
-    poses = []
-    for i in range(samples):
-        u = i / (samples - 1)
-        progress = u * u * (3 - 2 * u)
-        tilt = START_TILT - (START_TILT - END_TILT) * progress ** 1.6
-        # 면의 초기 방향에 맞춰 BASE Y축으로 회전한다.
-        rotation = normal_x * (90.0 - tilt)
-        axes = tuple(rotate_base_y(axis, rotation) for axis in initial_axes)
-        handle = rotate_base_y(UP, rotation)
-        width = (0.0, 1.0, 0.0)
-        normal = rotate_base_y((normal_x, 0.0, 0.0), rotation)
-        edge = translate((*START_XY, surface_z), travel, length * progress)
-        tcp = edge
-        for axis, offset in zip(axes, edge_offset):
-            tcp = translate(tcp, axis, -offset)
-        poses.append((edge, tcp, axes_to_zyz(axes), tilt, handle, width, normal))
-    return poses
-
-
 def format_values(values):
     return ', '.join(f'{value:.2f}' for value in values)
-
-
-# 접근→도포→후퇴 순서의 (설명, TCP XYZABC, 속도)를 yield한다. 계산만 수행한다.
-def application_moves(current, poses, transfer_z, transfer_speed, apply_speed):
-    """현재 위치에서 상승, 자세 변경, 접근, 도포 후 수직 후퇴한다."""
-    height = max(transfer_z, current[2], *(pose[1][2] for pose in poses))
-    _, start, abc, *_ = poses[0]
-    yield '이송 높이로 상승', (*current[:2], height, *current[3:]), transfer_speed
-    yield '픽업 자세에서 BASE Y축으로 눕히기', (*current[:2], height, *abc), transfer_speed
-    yield '도포 시작점 위로 이동', (*start[:2], height, *abc), transfer_speed
-    yield '시험판에 접근', (*start, *abc), apply_speed
-    for index, (_, tcp, angles, *_rest) in enumerate(poses[1:], 2):
-        yield f'도포 {index}/{len(poses)}', (*tcp, *angles), apply_speed
-    _, end, abc, *_ = poses[-1]
-    yield '도포 후 수직 상승', (*end[:2], height, *abc), apply_speed
 
 
 def orientation_error(actual, target):

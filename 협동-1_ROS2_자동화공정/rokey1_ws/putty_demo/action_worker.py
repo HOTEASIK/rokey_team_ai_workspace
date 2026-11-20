@@ -12,7 +12,6 @@ MODULES = {
     'initialize': 'initialize_device',
     'pickup': 'pickup_spatula',
     'scoop': 'scoop_putty',
-    'load': 'load_putty',
     'apply': 'apply_putty_plane',
     'return': 'return_spatula',
 }

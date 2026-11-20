@@ -29,7 +29,7 @@ from rokey_interfaces.action import PuttyTask, Process
 
 from utils.worker_process import WorkerProcess
 from .action_protocol import worker_command, process_putty_goal, process_error_code
-from .pickup_spatula import ROBOT_ID
+from utils.robot import ROBOT_ID  # config/robot.yaml robot 섹션
 
 
 class ProcessTaskView:
@@ -44,8 +44,6 @@ class ProcessTaskView:
         self.status = None
         self.latest = None
         self.fx = []
-        self.load_contact = None
-        self.load_start = None
         self.worker_started = False
 
     @property
@@ -56,19 +54,6 @@ class ProcessTaskView:
         self.latest = feedback  # 실시간 내부 피드백. DB용 완료 feedback과 구분한다.
 
     def observe_line(self, line):
-        if line.startswith('[판힘진단] '):
-            try:
-                sample = json.loads(line.split(' ', 1)[1])
-                if sample['stage'] == '접촉 감지':
-                    self.load_contact = sample['tcp']
-                if sample['stage'] == '힘 안정 확인 완료':
-                    self.load_start = sample['tcp']
-                value = float(sample['force'][2])
-                if sample['stage'] == '판 긁기 중' and math.isfinite(value):
-                    self.fx.append(value)  # 공통 샘플 버퍼. 작업별 축은 완료 피드백에 명시.
-            except (ValueError, KeyError, TypeError, IndexError):
-                pass
-            return
         if '단계=상향 도포 중' not in line:
             return
         match = re.search(r'실측BASE_Fxyz=\[([^\]]+)\]', line)
@@ -108,6 +93,8 @@ class PuttyTaskServer(Node):
         self.busy = False
         self.finishing = False
         self.faulted = False
+        self.spatula_held = False   # /process/putty_pickup 성공 ~ putty_return 성공 사이 = 헤라를 쥐고 있음
+        self.scoop_pass = None      # 다음 뜨기 회차. 집기 성공 때 robot.yaml scoop_pass 로, 뜨기 성공마다 +1 (4 다음 1)
         self.cancel_event = threading.Event()
         self.shutdown_event = threading.Event()
         self.prefix = f'/{ROBOT_ID}/dsr_controller2'
@@ -134,14 +121,13 @@ class PuttyTaskServer(Node):
             callback_group=self.group,
         )
 
-        self.process_load_action = ActionServer(
-            self, Process, '/process/putty_load', execute_callback=self.execute_process,
-            goal_callback=self.accept_load_goal, cancel_callback=self.cancel_goal, callback_group=self.group)
-
-    def accept_load_goal(self, request):
-        if request.task_code != 'PUTTY_LOAD':
-            return GoalResponse.REJECT
-        return self.reserve_goal()
+        # 전체 공정 퍼티 준비/정리: /process/putty_pickup, /process/putty_scoop, /process/putty_return
+        self.process_step_actions = [ActionServer(
+            self, Process, f'/process/{code.lower()}', execute_callback=self.execute_process,
+            goal_callback=lambda request, code=code: (self.reserve_goal() if request.task_code == code
+                                                      else GoalResponse.REJECT),
+            cancel_callback=self.cancel_goal, callback_group=self.group)
+            for code in ('PUTTY_PICKUP', 'PUTTY_SCOOP', 'PUTTY_RETURN')]
 
     def accept_goal(self, goal):
         try:
@@ -226,7 +212,8 @@ class PuttyTaskServer(Node):
         errors = []
         operations = [('작업 일시 정지', worker.freeze), ('로봇 정지', self.stop_robot),
                       ('작업 프로세스 종료', worker.terminate), ('종료 후 로봇 정지 재확인', self.stop_robot)]
-        if task in ('apply', 'load'):
+        # 힘제어나 컴플라이언스를 쓰는 작업. return은 실물 바닥 탐색, scoop은 실물 벽 긁기 중 켠다.
+        if task in ('apply', 'return', 'scoop'):
             request = ReleaseForce.Request()
             request.time = 0.3
             operations += [
@@ -398,9 +385,10 @@ class PuttyTaskServer(Node):
     def execute_process(self, handle):
         """공통 Process 결과/완료 피드백. 기존 실행기의 중간 취소·정리 절차를 재사용한다."""
         started = time.monotonic()
-        is_load = handle.request.task_code == 'PUTTY_LOAD'
-        step = 'putty_load' if is_load else 'putty_scrape'
-        axis = 'fz' if is_load else 'fx'
+        code = handle.request.task_code
+        is_apply = code == 'PUTTY'
+        step = 'putty_scrape' if is_apply else code.lower()     # task_log.step (= robot.yaml 키 이름)
+        axis = 'fx'
         result = Process.Result()
         view = None
         settings = None
@@ -408,11 +396,27 @@ class PuttyTaskServer(Node):
         try:
             from utils.config import CFG
             settings = CFG
-            request = process_putty_goal(handle.request, CFG, self.process_virtual_mode)
+            request = process_putty_goal(handle.request, CFG, self.process_virtual_mode, held=self.spatula_held,
+                                         scoop_pass=getattr(self, 'scoop_pass', None))
             view = ProcessTaskView(handle, request)
+            scoop_label = ''
+            if code == 'PUTTY_SCOOP':
+                from .scoop_putty import SCOOP_PASS_STEP_MM
+                n = getattr(self, 'scoop_pass', None) or int(CFG['force']['putty_scoop']['scoop_pass'])
+                step_mm = float(CFG['force']['putty_scoop'].get('scoop_pass_step', SCOOP_PASS_STEP_MM))
+                scoop_label = f'{n}회차 뜨기 (끝점 +X {(n-1)*step_mm:g} mm)'
+                self.get_logger().info(f'[scoop] {scoop_label} 시작')
             inner = self.execute(view, release_slot=False)
             result.success = inner.success
-            result.message = inner.message
+            result.message = f'[{scoop_label}] {inner.message}' if scoop_label else inner.message
+            if inner.success and code in ('PUTTY_PICKUP', 'PUTTY_RETURN'):
+                self.spatula_held = code == 'PUTTY_PICKUP'
+                self.scoop_pass = int(CFG['force']['putty_scoop']['scoop_pass']) if code == 'PUTTY_PICKUP' else None
+            if inner.success and code == 'PUTTY_SCOOP':
+                # 다음 뜨기는 몸체 쪽(+X)으로 한 칸. 용기 끝(SCOOP_MAX_PASS)을 넘으면 다시 1회차
+                from .scoop_putty import SCOOP_MAX_PASS
+                done = getattr(self, 'scoop_pass', None) or int(CFG['force']['putty_scoop']['scoop_pass'])
+                self.scoop_pass = done % SCOOP_MAX_PASS + 1
             result.error_code = ('' if inner.success else 'CANCELED' if view.status == 'canceled'
                                  else process_error_code(inner.message))
         except Exception as exc:
@@ -422,7 +426,8 @@ class PuttyTaskServer(Node):
         try:
             from utils.force_stats import summarize
             sample = self.process_snapshot()
-            cfg = settings['force'][step] if settings else {}
+            cfg = ((settings['force'].get(step) or settings['putty'].get(step.replace('putty_', '')) or {})
+                   if settings else {})   # putty_scrape / putty_scoop → force, putty_pickup / putty_return → putty
             params = dict(cfg)
             params.update(run_id=int(handle.request.run_id), gap_id=int(handle.request.gap_id),
                           start_point=list(handle.request.start_point), end_point=list(handle.request.end_point),
@@ -432,26 +437,18 @@ class PuttyTaskServer(Node):
                           task_valid=all(map(math.isfinite, sample['pose'])),
                           force_valid=all(map(math.isfinite, sample['force'])))
             trace = view.fx if view else []
-            target = float(cfg.get('hold_force') or 0) if is_load else float(cfg.get('target', [0])[0])
-            tolerance = float(cfg.get('force_tolerance' if is_load else 'tol') or 0)
+            target = float(cfg['target'][0]) if is_apply else 0.0   # 힘 목표는 도포만
+            tolerance = float(cfg.get('tol') or 0) if is_apply else 0.0
             _, stats = summarize(trace, target, tolerance, axis=axis)
             ratio = -1.0
-            if trace:
+            if trace and is_apply:
                 ratio = sum(abs(abs(f)-target) <= tolerance for f in trace)/len(trace)
                 data = json.loads(stats)
                 data.update(contact_ratio_metric='abs_base_'+axis, target=target, tolerance=tolerance)
                 stats = json.dumps(data, allow_nan=False)
             params.update(force_axis=axis, target_force=target,
-                          vel=float(cfg.get('scrape_speed' if is_load else 'apply_speed') or 0))
-            params['target_'+axis] = -target if is_load else target
-            if is_load:
-                params.update(coordinate_reference='plate_contact_tcp',
-                              contact_tcp=view.load_contact if view else None,
-                              scrape_start_tcp=view.load_start if view else None)
-                if cfg.get('hold_force') is None:
-                    params['target_force'] = params['target_fz'] = None
-                if cfg.get('scrape_speed') is None:
-                    params['vel'] = None
+                          vel=float(cfg.get('apply_speed' if is_apply else 'transfer_speed') or 0))
+            params['target_'+axis] = target
             feedback = Process.Feedback()
             feedback.state = 'RUNNING' if result.success else 'PAUSED' if result.error_code == 'CANCELED' else 'ERROR'
             feedback.step, feedback.step_success = step, result.success
@@ -497,8 +494,8 @@ def main(args=None):
         node.cancel_event.set()
     for signum in (signal.SIGINT, signal.SIGTERM):
         previous[signum] = signal.signal(signum, request_shutdown)
-    node.get_logger().info('퍼티 액션 준비: /dsr01/putty_task 및 팀 /process/putty. '
-                           '판 묻히기는 /process/putty_load. Goal 전에는 움직이지 않습니다.')
+    node.get_logger().info('퍼티 액션 준비: /dsr01/putty_task, /process/putty_pickup · putty_scoop · putty · '
+                           'putty_return. Goal 전에는 움직이지 않습니다.')
     try:
         while not node.shutdown_event.is_set() or node.busy:
             executor.spin_once(timeout_sec=0.1)
@@ -506,7 +503,8 @@ def main(args=None):
         executor.shutdown()
         node.action.destroy()
         node.process_action.destroy()
-        node.process_load_action.destroy()
+        for action in node.process_step_actions:
+            action.destroy()
         node.destroy_node()
         node.server_lock.close()
         rclpy.shutdown()

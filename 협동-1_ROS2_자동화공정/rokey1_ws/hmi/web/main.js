@@ -27,6 +27,8 @@ const ui = {
   values: {},          // task_id → {key: value}
   temp: {},            // remember=false 항목 (저장 안 함, 새로고침하면 비움)
   logs: [],
+  blogs: [],            // 로봇 bringup 출력 (따로 보여 줌)
+  channel: 'main',
   filter: 'ALL',
   faults: 0,
   state: null,
@@ -36,6 +38,7 @@ const ui = {
   trail: [],
   lastRunsKey: '',
   layout: 'stack',     // stack(위·아래) | split(좌·우)
+  view: 'coords',      // TCP 카드: coords(자세 그림 + 6좌표) | path(위에서 본 경로)
   page: 'control',     // control(작업 제어판) | monitor(실시간 작업 현황)
   speed: { pct: 100, unlocked: false, max: 100, min: 10, default: 100 },
   speedDragging: false,
@@ -144,23 +147,31 @@ function collectParams() {
 function setMode(mode) {
   ui.mode = mode;
   document.querySelectorAll('.mode-btn').forEach((b) => b.classList.toggle('active', b.dataset.mode === mode));
-  $('realWarning').hidden = mode !== 'real';
   $('modeFoot').textContent = MODE_KO[mode];
   saveUi();
 }
 
 function saveUi() {
-  try { localStorage.setItem('rokey1-hmi', JSON.stringify({ group: ui.group, taskId: ui.taskId, mode: ui.mode, values: ui.values, layout: ui.layout, alertOn: ui.alertOn, page: ui.page, uiMode: ui.uiMode })); } catch (e) { /* ignore */ }
+  try { localStorage.setItem('rokey1-hmi', JSON.stringify({ group: ui.group, taskId: ui.taskId, mode: ui.mode, values: ui.values, layout: ui.layout, view: ui.view, alertOn: ui.alertOn, page: ui.page, uiMode: ui.uiMode })); } catch (e) { /* ignore */ }
 }
 function loadUi() {
   try { Object.assign(ui, JSON.parse(localStorage.getItem('rokey1-hmi')) || {}); } catch (e) { /* ignore */ }
 }
 
 // ------------------------------------------------------------------ 명령
+// 화면 정중앙 예/아니요 팝업 → 예 = true, 아니요/Esc = false
+function ask(msg) {
+  const dlg = $('askDlg');
+  $('askMsg').textContent = msg;
+  dlg.returnValue = '';
+  dlg.showModal();
+  return new Promise((done) => dlg.addEventListener('close', () => done(dlg.returnValue === 'yes'), { once: true }));
+}
+
 async function startTask() {
   const task = currentTask();
   if (!task) return;
-  if (ui.mode === 'real' && !confirm(`[실제 로봇] ${task.label} 을(를) 실제 로봇으로 실행합니다.\n주변이 안전한지 확인했습니까?`)) return;
+  if (ui.mode === 'real' && !(await ask(`[실제 로봇] ${task.label} 을(를) 실제 로봇으로 실행합니다.\n주변이 안전한지 확인했습니까?`))) return;
   try {
     const { run } = await api('/api/start', { task_id: task.id, mode: ui.mode, params: collectParams() });
     $('lastCommand').textContent = `${task.label} / ${MODE_KO[ui.mode]}`;
@@ -177,6 +188,23 @@ async function goHome() {
     $('lastCommand').textContent = `홈 위치로 이동 / ${MODE_KO[ui.mode]}`;
     $('lastCommandSub').textContent = `실행 #${run.run_id} 시작`;
   } catch (e) { toast(e.message); }
+}
+
+async function bringup(mode) {
+  if (mode === 'real' && !confirm('[실제 로봇] 실제 로봇 bringup 을 시작합니다.\n주변이 안전한지 확인했습니까?')) return;
+  try {
+    await api('/api/bringup', { mode });
+    setMode(mode);
+    $('lastCommand').textContent = `bringup / ${MODE_KO[mode]}`;
+    $('lastCommandSub').textContent = '액션 서버는 공정 시작 때 필요한 것만 자동으로 켜집니다';
+  } catch (e) { toast(e.message); }
+}
+
+async function stopBringup() {
+  const run = (ui.state?.runs || []).find((r) => r.task_id === 'bringup' && ['starting', 'running'].includes(r.state));
+  if (!run) { toast('HMI 에서 띄운 bringup 이 없습니다.', 'warn'); return; }
+  if (!confirm('bringup 을 끕니다. 로봇 연결이 끊깁니다.')) return;
+  stopRun(run.run_id);
 }
 
 // ------------------------------------------------------------------ 속도
@@ -261,7 +289,7 @@ function showAlert(l) {
   el.dataset.count = 1;
   el.innerHTML = `<div class="alert-head"><span class="alert-icon">${kind === 'error' ? '✕' : '!'}</span><b>${esc(ko(TYPE_KO, l.type))}</b><span class="alert-src">${esc(l.source)}${l.run_id ? ` · 실행 #${l.run_id}` : ''}</span><span class="alert-count"></span><time>${fmtTime(l.t)}</time><button class="alert-close" title="닫기">✕</button></div><pre class="alert-raw">${esc(raw)}</pre><div class="alert-foot"><span>${kind === 'warn' ? '12초 뒤 자동으로 닫힘' : '확인 후 직접 닫아 주세요'}</span><button class="alert-copy">복사</button><button class="alert-log">로그에서 보기</button></div>`;
   el.querySelector('.alert-close').addEventListener('click', close);
-  el.querySelector('.alert-copy').addEventListener('click', () => { navigator.clipboard?.writeText(raw).then(() => toast('로그를 복사했습니다.', 'info')).catch(() => {}); });
+  el.querySelector('.alert-copy').addEventListener('click', () => { copyText(raw).then(() => toast('로그를 복사했습니다.', 'info')).catch(() => {}); });
   el.querySelector('.alert-log').addEventListener('click', () => { setFilter(l.type); close(); setPage('monitor'); $('consoleLog').scrollIntoView({ behavior: 'smooth', block: 'center' }); });
   list.prepend(el);
   while (list.children.length > MAX_ALERTS) list.lastElementChild.remove();
@@ -310,22 +338,56 @@ function setLayout(layout) {
 // ------------------------------------------------------------------ 로그
 function addLogs(entries, live = false) {
   if (live) entries.forEach((l) => { if (l.popup) showAlert(l); });
-  entries.forEach((l) => { if (l.type === 'ERROR') ui.faults += 1; });
-  ui.logs.push(...entries);
-  if (ui.logs.length > MAX_LOGS) ui.logs.splice(0, ui.logs.length - MAX_LOGS);
+  entries.forEach((l) => {
+    if (l.channel === 'bringup') { ui.blogs.push(l); if (l.type === 'ERROR' && ui.channel !== 'bringup') ui.bringupErr = true; return; }
+    if (l.type === 'ERROR') ui.faults += 1;
+    ui.logs.push(l);
+  });
+  [ui.logs, ui.blogs].forEach((a) => { if (a.length > MAX_LOGS) a.splice(0, a.length - MAX_LOGS); });
   renderLogs();
 }
 
 function renderLogs() {
-  const visible = ui.filter === 'ALL' ? ui.logs : ui.logs.filter((l) => l.type === ui.filter);
+  const logs = ui.channel === 'bringup' ? ui.blogs : ui.logs;
+  const visible = ui.filter === 'ALL' ? logs : logs.filter((l) => l.type === ui.filter);
   const box = $('consoleLog');
   box.innerHTML = visible.slice(-300).map((l) => `<div class="log-row${l.state === 'INPUT' ? ' prompt' : ''}"><time>${fmtTime(l.t)}</time><span class="log-type ${l.type.toLowerCase()}">${ko(TYPE_KO, l.type)}</span><span class="log-source" title="${esc(l.source)}">${esc(l.source)}</span><span class="log-message" title="${esc(l.message)}">${esc(l.message)}</span><span class="log-state ${l.type.toLowerCase()}">${esc(ko(LOGSTATE_KO, l.state))}</span></div>`).join('');
   if ($('autoScroll').checked) box.scrollTop = box.scrollHeight;
-  $('logCount').textContent = String(visible.length).padStart(2, '0');
+  $('logCount').textContent = String(ui.logs.length).padStart(2, '0');
+  $('bringupCount').textContent = String(ui.blogs.length).padStart(2, '0');
+  $('bringupErrDot').hidden = !ui.bringupErr;
   $('visibleCount').textContent = Math.min(visible.length, 300);
-  $('totalCount').textContent = ui.logs.length;
+  $('totalCount').textContent = logs.length;
   $('faultValue').textContent = `${ui.faults}건`;
   $('faultValue').className = ui.faults ? 'error-text' : '';
+}
+
+function setChannel(channel) {
+  ui.channel = channel === 'bringup' ? 'bringup' : 'main';
+  if (ui.channel === 'bringup') ui.bringupErr = false;
+  document.querySelectorAll('.log-channel').forEach((b) => b.classList.toggle('active', b.dataset.channel === ui.channel));
+  renderLogs();
+}
+
+// http://<IP>:8080 (보안 컨텍스트 아님) 에서는 navigator.clipboard 가 없으므로 textarea 방식으로 대신한다
+function copyText(text) {
+  if (navigator.clipboard && window.isSecureContext) return navigator.clipboard.writeText(text);
+  const ta = document.createElement('textarea');
+  ta.value = text;
+  ta.style.cssText = 'position:fixed;top:0;left:0;opacity:0';
+  document.body.appendChild(ta);
+  ta.select();
+  const ok = document.execCommand('copy');
+  ta.remove();
+  return ok ? Promise.resolve() : Promise.reject(new Error('copy failed'));
+}
+
+function copyLogs() {
+  const logs = ui.channel === 'bringup' ? ui.blogs : ui.logs;
+  if (!logs.length) { toast('복사할 로그가 없습니다.', 'warn'); return; }
+  const text = logs.map((l) => `${fmtTime(l.t)} [${l.type}] ${l.source}${l.run_id ? ` #${l.run_id}` : ''}: ${l.raw || l.message}`).join('\n');
+  const name = ui.channel === 'bringup' ? '로봇 bringup' : '작업';
+  copyText(text).then(() => toast(`${name} 로그 ${logs.length}줄을 복사했습니다.`, 'info')).catch(() => toast('복사하지 못했습니다.'));
 }
 
 function setFilter(filter) {
@@ -338,8 +400,12 @@ function setFilter(filter) {
 function renderState(s) {
   ui.state = s;
   const runs = s.runs || [];
-  const active = runs.filter((r) => r.state === 'starting' || r.state === 'running');
-  const main = active.find((r) => r.motion) || active[active.length - 1] || runs[runs.length - 1];
+  const alive = runs.filter((r) => r.state === 'starting' || r.state === 'running');
+  const active = alive.filter((r) => r.kind !== 'service');     // 계속 떠 있는 서버/bringup 은 '작업' 이 아님
+  const work = runs.filter((r) => r.kind !== 'service');
+  const main = active.find((r) => r.motion) || active[active.length - 1] || work[work.length - 1];
+  // 서비스만 보이고 /joint_states 가 없으면(꺼진 bringup 의 잔여·고아 컨트롤러) 연결 안 된 것으로 본다
+  renderModeChip(alive, { ...(s.links || {}), controller: Boolean(s.links?.controller && !(s.robot || {}).stale) });
   const waiting = active.find((r) => r.awaiting_input);
   const robot = s.robot || {};
   const links = s.links || {};
@@ -449,6 +515,8 @@ function renderState(s) {
     }
   }
   drawArm(robot.joints, p);
+  if (ui.view === 'path') drawPath(p);
+  $('posxText').textContent = p ? p.map((v) => v.toFixed(1)).join(', ') : '--';
   renderJoints(robot.joints);
 
   // --- 안전
@@ -464,15 +532,36 @@ function renderState(s) {
   $('safetyFoot').textContent = s.estop ? '비상 정지' : badRobot ? '고장' : '정상';
   $('estopBtn').classList.toggle('triggered', s.estop);
   $('estopLabel').textContent = s.estop ? '비상 정지 해제' : '비상 정지';
-  $('monEstopLabel').textContent = s.estop ? '비상 정지 해제' : '비상 정지';
-  $('monEstopBtn').classList.toggle('triggered', s.estop);
   $('armedTag').textContent = s.estop ? '잠김' : '준비';
-  $('startBtn').disabled = s.estop;
-  $('homeBtn').disabled = s.estop;
+  const robotReady = Boolean((links.controller && !robot.stale) || links.fake);   // /joint_states 까지 와야 연결. fake:=true 는 bringup 없이 DB 흐름 시험
+  $('startBtn').disabled = s.estop || !robotReady;
+  $('startBtn').title = robotReady ? '고른 작업을 시작 (공정은 필요한 액션 서버가 없으면 먼저 켬)' : '로봇 bringup 이 꺼져 있습니다. sodvir / sodreal 을 먼저 누르세요';
+  $('startTaskName').textContent = robotReady ? (currentTask()?.label || '') : 'bringup 필요';
+  $('homeBtn').disabled = s.estop || !(links.controller && !robot.stale);
   $('speedUnlockBtn').disabled = s.estop && !s.speed?.unlocked;
   renderSpeed(s.speed);
 
   renderRuns(runs, active, waiting);
+}
+
+const SERVER_IDS = ['explore_server', 'putty_task_server', 'tool_task_server'];
+function renderModeChip(alive, links) {
+  const up = alive.find((r) => r.task_id === 'bringup');
+  if (up && up.mode !== ui.mode) setMode(up.mode);          // 모드는 bringup 을 따라간다
+  const servers = alive.filter((r) => SERVER_IDS.includes(r.task_id)).length;
+  const chip = $('modeChip');
+  let text; let sub;
+  const srv = servers ? ` · 서버 ${servers}개 실행 중` : '';
+  if (up) { text = MODE_KO[up.mode]; sub = links.controller ? `bringup 연결됨${srv}` : 'bringup 시작 중…'; }
+  else if (links.controller) { text = `${MODE_KO[ui.mode]} (외부 bringup)`; sub = `모드가 맞는지 확인${srv}`; }
+  else { text = 'bringup 꺼짐'; sub = 'sodvir 또는 sodreal 을 누르세요'; }
+  $('modeChipText').textContent = text;
+  $('modeChipSub').textContent = sub;
+  chip.dataset.state = !up && !links.controller ? 'off' : links.controller ? 'ok' : 'wait';
+  chip.classList.toggle('real', (up ? up.mode : ui.mode) === 'real' && chip.dataset.state !== 'off');
+  $('bringupStopBtn').disabled = !up;
+  $('sodvirBtn').classList.toggle('active', Boolean(up) && up.mode === 'virtual');
+  $('sodrealBtn').classList.toggle('active', Boolean(up) && up.mode === 'real');
 }
 
 function setDot(id, color) { $(id).className = `link-dot ${color}`; }
@@ -669,6 +758,47 @@ function drawArm(joints, posx) {
   svg.innerHTML = out;
 }
 
+// 위에서 본 TCP 경로: 화면 위 = +X(앞), 왼쪽 = +Y. 격자·궤적은 drawArm 과 같은 GRID / ui.trail 사용
+const top2d = (p) => [-p[1], -p[0]];
+function drawPath(posx) {
+  const svg = $('pathView');
+  if (!svg.dataset.ready) {
+    svg.setAttribute('viewBox', `${GRID.yMin - 60} ${-GRID.xMax - 60} ${GRID.yMax - GRID.yMin + 120 + 380} ${GRID.xMax - GRID.xMin + 120}`);
+    svg.dataset.ready = '1';
+  }
+  const pt = (p) => top2d(p).map((v) => v.toFixed(1)).join(',');
+  const line = (a, b, cls) => { const [x1, y1] = top2d(a); const [x2, y2] = top2d(b); return `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" class="${cls}"/>`; };
+  let out = '<defs><marker id="pathHead" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="axis-head"/></marker></defs>';
+  for (let x = GRID.xMin; x <= GRID.xMax; x += GRID.step) out += line([x, GRID.yMin], [x, GRID.yMax], `g${x === 0 ? ' axis' : ''}`);
+  for (let y = GRID.yMin; y <= GRID.yMax; y += GRID.step) out += line([GRID.xMin, y], [GRID.xMax, y], `g${y === 0 ? ' axis' : ''}`);
+  const o = [GRID.xMin, GRID.yMax];
+  [['X', [150, 0]], ['Y', [0, 150]]].forEach(([n, v]) => {
+    const e = [o[0] + v[0], o[1] + v[1]];
+    const [lx, ly] = top2d([o[0] + v[0] * 1.35, o[1] + v[1] * 1.35]);
+    out += `${line(o, e, 'axis-arrow').replace('/>', ' marker-end="url(#pathHead)"/>')}<text x="${lx}" y="${ly}" class="lbl axis-l" text-anchor="middle" dominant-baseline="middle">${n}</text>`;
+  });
+  out += `<polygon points="${[[-90, -90], [90, -90], [90, 90], [-90, 90]].map(pt).join(' ')}" class="base-plate"/>`;
+  if (ui.trail.length > 1) out += `<polyline points="${ui.trail.map(pt).join(' ')}" class="trail"/>`;
+  if (posx) {
+    const [tx, ty] = top2d(posx);
+    out += `<circle cx="${tx}" cy="${ty}" r="12" class="tcp-dot"/>`;
+    out += `<text x="${tx + 30}" y="${ty + 10}" class="lbl tcp-l"><tspan class="jn">TCP</tspan> X ${posx[0].toFixed(1)}  Y ${posx[1].toFixed(1)}  Z ${posx[2].toFixed(1)}</text>`;
+  } else {
+    const [cx, cy] = top2d([300, 0]);
+    out += `<text x="${cx}" y="${cy}" class="lbl nodata" text-anchor="middle">좌표 없음</text>`;
+  }
+  svg.innerHTML = out;
+}
+
+function setView(view) {
+  ui.view = view === 'path' ? 'path' : 'coords';
+  $('pathBox').hidden = ui.view !== 'path';
+  $('armBox').hidden = ui.view === 'path';
+  document.querySelectorAll('.view-btn').forEach((b) => b.classList.toggle('active', b.dataset.view === ui.view));
+  if (ui.view === 'path') drawPath(ui.state?.robot?.posx || null);
+  saveUi();
+}
+
 function updateLatencyBars() {
   const box = $('latencyBars');
   if (!box.children.length) for (let i = 0; i < 25; i += 1) box.appendChild(document.createElement('i'));
@@ -695,7 +825,7 @@ function connect() {
   const es = new EventSource('/api/events');
   es.addEventListener('open', () => setConnected(true));
   es.addEventListener('error', () => setConnected(false));
-  es.addEventListener('backlog', (e) => { ui.logs = []; ui.faults = 0; addLogs(JSON.parse(e.data)); });
+  es.addEventListener('backlog', (e) => { ui.logs = []; ui.blogs = []; ui.faults = 0; addLogs(JSON.parse(e.data)); });
   es.addEventListener('log', (e) => addLogs([JSON.parse(e.data)], true));
   es.addEventListener('speed', (e) => renderSpeed(JSON.parse(e.data)));
   es.addEventListener('state', (e) => renderState(JSON.parse(e.data)));
@@ -725,11 +855,12 @@ function bind() {
   $('stopBtn').addEventListener('click', () => stopRun(null));
   $('estopBtn').addEventListener('click', toggleEstop);
   $('homeBtn').addEventListener('click', goHome);
+  $('sodvirBtn').addEventListener('click', () => bringup('virtual'));
+  $('sodrealBtn').addEventListener('click', () => bringup('real'));
+  $('bringupStopBtn').addEventListener('click', stopBringup);
   document.querySelectorAll('.page-tab').forEach((b) => b.addEventListener('click', () => setPage(b.dataset.page)));
   window.addEventListener('hashchange', () => setPage(location.hash.slice(1), false));
   document.querySelectorAll('[data-uimode]').forEach((b) => b.addEventListener('click', () => setUiMode(b.dataset.uimode)));
-  $('monStopBtn').addEventListener('click', () => stopRun(null));
-  $('monEstopBtn').addEventListener('click', toggleEstop);
   $('resetParamsBtn').addEventListener('click', resetParams);
   const range = $('speedRange');
   range.addEventListener('input', () => { ui.speedDragging = true; renderSpeed(ui.speed); });
@@ -740,7 +871,23 @@ function bind() {
   $('alertPopup').addEventListener('change', (e) => { ui.alertOn = e.target.checked; if (!ui.alertOn) clearAlerts(); saveUi(); });
   $('alertClear').addEventListener('click', clearAlerts);
   document.querySelectorAll('[data-filter]').forEach((b) => b.addEventListener('click', () => setFilter(b.dataset.filter)));
-  $('clearBtn').addEventListener('click', () => { ui.logs = []; ui.faults = 0; ui.trail = []; renderLogs(); });
+  $('clearBtn').addEventListener('click', () => {
+    if (ui.channel === 'bringup') { ui.blogs = []; ui.bringupErr = false; } else { ui.logs = []; ui.faults = 0; ui.trail = []; }
+    renderLogs();
+  });
+  document.querySelectorAll('.log-channel').forEach((b) => b.addEventListener('click', () => setChannel(b.dataset.channel)));
+  $('copyLogsBtn').addEventListener('click', copyLogs);
+  $('logFullBtn').addEventListener('click', () => {
+    const on = document.querySelector('.event-console').classList.toggle('log-full');
+    $('logFullBtn').textContent = on ? '✕ 닫기' : '⛶ 전체 보기';
+    if (on) { const box = $('consoleLog'); box.scrollTop = box.scrollHeight; }
+  });
+  document.querySelectorAll('.view-btn').forEach((b) => b.addEventListener('click', () => setView(b.dataset.view)));
+  $('copyPosxBtn').addEventListener('click', () => {
+    const t = $('posxText').textContent;
+    if (t === '--') { toast('복사할 좌표가 없습니다.', 'warn'); return; }
+    copyText(t).then(() => toast(`posx 복사: ${t}`, 'info')).catch(() => toast('복사하지 못했습니다.'));
+  });
   $('focusBtn').addEventListener('click', () => $('simulationCard').classList.toggle('focused'));
   $('stdinForm').addEventListener('submit', (e) => { e.preventDefault(); sendStdin($('stdinText').value); });
   document.querySelectorAll('[data-quick]').forEach((b) => b.addEventListener('click', () => sendStdin(b.dataset.quick)));
@@ -766,6 +913,7 @@ async function init() {
   setConnected(false);
   renderJoints(null);
   drawArm(null, null);
+  setView(ui.view);
   updateLatencyBars();
   setInterval(() => {
     const d = new Date();

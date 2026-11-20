@@ -15,7 +15,7 @@ wall_size.py 는 벽을 누른 채 미끄러지며 재는 방식이고, 이 노�
                TOL 까지 이분탐색 → top_z,   높이 = top_z - floor_z
              height_lats 로 옆 위치 여러 곳에서 반복 → 중앙값 (이전 끝점을 힌트로 써서 빠르게)
   4. 너비  : 높이의 width_ups 비율 높이(기본 0.5 = 가운데)에서 왼쪽(+Y) → 오른쪽(−Y) 순서로 같은 방법
-             (width_first=left. 가동 범위 때문에 기준 자세로 먼저 +Y, 자세를 바꿔 −Y)
+             (width_first=left. 첫 쪽(+Y)은 그 자리에서 수평 자세로, −Y 는 홈을 멈추지 않고 지나(amovesj) 자세 변경)
              자세(width_ori=lean): 공구 축을 Z축과 수직(수평)으로 두고 벽을 정면으로 봄 (width_yaw=0, 기본)
                - width_yaw=0 이면 양쪽 자세가 같음 [0, 90, 90] → 처음 한 번만 자세를 바꾸고 그대로 양쪽 탐색
                - 아래는 width_yaw=45 로 줄 때 (Z축 둘레로 찍는 쪽으로 45° 기울임)
@@ -105,6 +105,7 @@ class Cfg:
     force = 10.0                # 힘 제어 지령 크기 [N] (바닥: -Z, 벽: 벽 방향)
     stall_mm = 0.3              # (real) 이 거리 이하로만 움직이면 '정체'
     stall_sec = 0.3             # (real) ... 이 시간 동안
+    flex_mm = 3.0               # (real) 접촉 시작 뒤 이만큼 더 밀려 들어가면 정체 없이도 '닿음' (휘는 도구는 계속 휘며 밀려 정체가 안 걸림, run72). 0 = 정체만
     max_fc_speed = 40.0         # (real) 힘 제어 중 이 속도[mm/s] 넘으면 위험 → 중단
     probe_vel = 10.0            # (virtual) 찍기 전진 속도 [mm/s]
     move_vel = 40.0             # 찍기 사이 이동 속도 [mm/s]
@@ -128,8 +129,8 @@ class Cfg:
     lift = 10.0                 # 바닥에서 이만큼 띄워서 첫 벽 찾기 / 높이 측정 시작
     standoff = 15.0             # 찍기 전 벽 표면 앞 대기 거리
     max_depth = 20.0            # 표면보다 이만큼 더 들어가도 안 닿으면 '안 닿음'
-    step_z = 30.0               # 높이 측정 간격
-    step_y = 30.0               # 너비 측정 간격
+    step_z = 40.0               # 높이 측정 간격
+    step_y = 40.0               # 너비 측정 간격
     tol = 1.0                   # 이분탐색 종료 구간 크기
     miss_confirm = 2            # 연속 이만큼 안 닿아야 '벽 끝' (한 번의 오판 방지)
 
@@ -156,6 +157,9 @@ class Cfg:
     width_ref_j_right = (0.0, 27.46, 127.68, 176.69, 64.48, 91.43)
     flip_clear = 60.0           # 자세 바꾸는 관절 경로에서 탐침 끝이 바닥 위/벽 앞에 남길 여유 [mm] (모자라면 들어 올리고 물러남)
     reorient_z_max = 600.0      # 자세 바꾸려고 들어 올릴 수 있는 최대 높이 (BASE z) [mm]
+    via_dz = 50.0               # (홈 경유 자세 바꾸기) 경유점 높이 후보 간격 [mm]
+    via_dx = 10.0               # (홈 경유 자세 바꾸기) 경유점·도착점을 벽 쪽으로 옮기는 후보 간격 [mm] (벽 앞 standoff 까지)
+    j3_max = 135.0              # 자세 바꾸기 목표 관절값의 |J3| 상한 [deg] (컨트롤러 한계 ±135 에서 2° 여유. 너비 자세 자체가 J3 ≈ 132 라 130 은 막힘, run64)
     probe_len = 0.0             # 등록 TCP 에서 탐침 끝까지 더할 길이 [mm], 공구 z 방향 (실측: 펜던트 TCP 가 이미 손끝 → 0)
     joint_vel = 10.0            # 자세 바꿀 때 movej 속도 [deg/s]
     joint_acc = 20.0            # movej 가속도 [deg/s²]
@@ -401,8 +405,40 @@ class TapIO(ws.SizeIO):
                     self.stop()
                     raise RuntimeError(f'관절 이동 시간 초과 (목표 {np.round(qi, 1).tolist()})')
                 time.sleep(ws.SAMPLE_PERIOD)
+            now = np.array([float(v) for v in self.dsr.get_current_posj()[:6]])
+            if np.max(np.abs(now - qi)) > 1.0:              # 컨트롤러가 거부(관절 한계 등)해도 ret 은 성공일 수 있음
+                raise RuntimeError(f'관절 이동 도착 실패 ({i}/{n}): 현재 {np.round(now, 1).tolist()} / '
+                                   f'목표 {np.round(qi, 1).tolist()} → 관절 한계 / NOT REACHABLE 로그 확인')
             time.sleep(0.3)                                 # 멈춘 뒤 흔들림 가라앉히기
             self.zero_force()                               # 이 자세의 공구 무게 영향을 영점으로
+
+    def move_sj(self, qs, vel=None, acc=None):
+        """관절 경유점들을 멈추지 않고 지나는 스플라인 이동 (amovesj, 가드 감시). 도착 못 하면 에러."""
+        vel = C.joint_vel if vel is None else vel
+        acc = C.joint_acc if acc is None else acc
+        pts = [np.array([float(v) for v in q[:6]]) for q in qs]
+        cur = np.array([float(v) for v in self.dsr.get_current_posj()[:6]])
+        span = sum(float(np.max(np.abs(b - a))) for a, b in zip([cur] + pts[:-1], pts))
+        self._seg += 1
+        self._check(self.dsr.amovesj([self.dsr.posj(*p.tolist()) for p in pts], vel=vel, acc=acc), 'amovesj')
+        timeout = span / max(vel, 1e-3) * 3.0 + 10.0
+        t0 = time.time()
+        started = False
+        while True:
+            if self.guard is not None:
+                self._guarded(self.get_pos(), (), 'movesj')
+            moving = self.is_moving()
+            started = started or moving
+            if (started and not moving) or (not started and time.time() - t0 > 3.0):
+                break                                       # 스플라인은 출발이 늦을 수 있음 → 출발 뒤 멈춤 = 끝
+            if time.time() - t0 > timeout:
+                self.stop()
+                raise RuntimeError(f'스플라인 이동 시간 초과 (목표 {np.round(pts[-1], 1).tolist()})')
+            time.sleep(ws.SAMPLE_PERIOD)
+        q = np.array([float(v) for v in self.dsr.get_current_posj()[:6]])
+        if np.max(np.abs(q - pts[-1])) > 1.0:              # 컨트롤러가 거부(NOT REACHABLE 등)해도 ret 은 성공일 수 있음
+            raise RuntimeError(f'스플라인 이동 도착 실패: 현재 {np.round(q, 1).tolist()} / 목표 {np.round(pts[-1], 1).tolist()}')
+        time.sleep(0.3)                                     # 멈춘 뒤 흔들림 가라앉히기
 
     def end_force(self):
         """힘 제어 → 순응제어 순서로 해제 (virtual 은 정지)."""
@@ -527,7 +563,8 @@ class WallTapper:
 
         hit, travel, peak, latency = None, 0.0, 0.0, None
         hist, trace = deque(), []
-        t_cross = t_on = onset_pos = t_ref = None
+        t_cross = t_on = onset_pos = t_ref = timeout_msg = None
+        ever_on = False                           # 한 번이라도 접촉 상태였는지 (시간 초과 원인 표시용)
         t0 = time.time()
         io.start_force(d, start, depth)
         try:
@@ -535,7 +572,8 @@ class WallTapper:
                 now = time.time()
                 pos = io.get_pos()
                 w = self._sense(pos, d, kind)
-                raw = abs(float(np.dot(w[:3], d)))
+                # 진행 방향을 거슬러 미는 힘만 접촉 (벽/바닥 반력은 항상 −d 쪽, run90: +d 쪽 2.1N 출발 흔들림을 접촉으로 오판)
+                raw = max(0.0, -float(np.dot(w[:3], d)))
                 f = filt(raw)
                 peak = max(peak, raw)
                 travel = float(np.dot(pos - start, d))
@@ -559,21 +597,40 @@ class WallTapper:
                 moved = float(np.linalg.norm(pos - hist[0][1]))
                 stalled = span >= C.stall_sec * 0.9 and moved < C.stall_mm
 
-                if t_on is not None and now - t_on >= C.contact_hold and (io.mode == 'virtual' or stalled):
-                    hit = onset_pos if io.mode == 'virtual' else pos.copy()   # real: 힘을 풀기 전 좌표
-                    self.last_onset = onset_pos.copy()  # 접촉 시작 좌표 (휘는 벽이면 hit 보다 앞)
+                pushed = float(np.dot(pos - onset_pos, d)) if t_on is not None else 0.0   # 접촉 시작 뒤 더 들어간 거리
+                if t_on is not None:
+                    ever_on = True
+                if t_on is not None and now - t_on >= C.contact_hold and (
+                        io.mode == 'virtual' or stalled or (C.flex_mm > 0 and pushed >= C.flex_mm)):
+                    # 접촉 시작 좌표 (real 도: 휘는 도구는 멈춘/밀린 위치가 휜 만큼 더 들어가 있음)
+                    hit = onset_pos.copy()
+                    self.last_onset = onset_pos.copy()
                     latency = now - t_ref
                     break
-                if travel > depth:
-                    break                           # 안 닿음
+                if travel > depth and (t_on is None or travel > depth + C.max_depth):
+                    break                           # 안 닿음 (힘이 걸린 채면 max_depth 만큼 더 기다림: 탄성 물건이 휘는 중일 수 있음)
                 if io.mode == 'real' and span > 0.05 and moved / span > C.max_fc_speed:
                     raise TapError(f'힘 제어 속도 {moved / span:.0f}mm/s > {C.max_fc_speed:.0f} → 중단 '
                                    '(force 를 줄이거나 stiff_soft 를 높일 것)')
                 if now - t0 > C.probe_timeout:
                     if t_on is None and travel > depth - C.max_depth / 2:
                         break                       # 표면보다 max_depth/2 넘게 들어갔는데 힘 없음 → 안 닿음 (끝 너머에서 느리게 진행)
-                    raise TapError(f'찍기 시간 초과 ({kind}, 진행 {travel:.1f}/{depth:.0f}mm) '
-                                   '→ 힘 제어로 움직이지 않음. force 를 확인')
+                    if kind != 'wall_seek' and travel > depth:
+                        # 예상 표면보다 깊이 들어가도록 정체 없음 → 벽 면이 아님 (끝 모서리를 스치며 미끄러짐, run90) → 안 닿음
+                        self.log.info(f'  [{kind}] 표면 너머 {travel - depth:.1f}mm 까지 정체 없이 진행 '
+                                      f'(최대 {peak:.1f}N) → 모서리 스침으로 보고 안 닿음 처리')
+                        break
+                    speed = moved / span if span > 0 else 0.0
+                    if ever_on:
+                        why = '접촉은 감지됐지만 정체 없이 계속 밀려 들어감 (도구 휨 → flex_mm 확인)'
+                    elif peak >= th_in:
+                        why = '순간 힘만 임계값을 넘음 (필터 후 미달)'
+                    else:
+                        why = '힘이 임계값까지 안 걸림 (도구 휨/미끄러짐 또는 아무것도 안 닿음)'
+                    timeout_msg = (f'찍기 시간 초과 ({kind}, 진행 {travel:.1f}/{depth:.0f}mm, 최대 힘 {peak:.1f}N '
+                                   f'/ 임계 {th_in:.1f}N, 최근 속도 {speed:.1f}mm/s, '
+                                   f'끝 {np.round(pos, 1).tolist()}) → {why}')
+                    break
                 time.sleep(C.sample)
         finally:
             io.end_force()
@@ -584,8 +641,12 @@ class WallTapper:
                'travel': round(travel, 2), 'duration': round(time.time() - t0, 3),
                'th_in': round(th_in, 3), 'peak': round(peak, 3),
                'latency': None if latency is None else round(latency, 3)}
+        if timeout_msg:
+            rec['timeout'] = timeout_msg
         self.taps.append(rec)
-        self.traces.append(trace)
+        self.traces.append(trace)                 # 시간 초과여도 시계열을 남김 (원인 분석용)
+        if timeout_msg:
+            raise TapError(timeout_msg)
         self.log.info(f'  [{kind}] {"닿음 " + str(rec["xyz"]) if hit is not None else "안 닿음"} '
                       f'(진행 {travel:.1f}mm, 최대 {peak:.1f}N'
                       + (f', 지연 {latency * 1000:.0f}ms)' if latency is not None else ')'))
@@ -788,6 +849,7 @@ class WallTapper:
                 if q is None:
                     raise TapError(f'[자세] {label}: 기준 관절 배치(sol {sol})로 {np.round(back, 1).tolist()} '
                                    f'{ori} 에 도달 불가 → width_ref_j_* 또는 시작 위치 확인')
+                self._check_j3(q, label, back)                  # 물러날수록 J3 가 커짐 → 한계 넘으면 더 물러나지 않고 멈춤
                 low, far = self._sweep(io.dsr.get_current_posj(), q)
                 lift = (self.floor_z + C.flip_clear) - low          # 바닥까지 여유 부족분
                 retreat = far - (self.face - C.flip_clear)          # 벽까지 여유 부족분
@@ -812,6 +874,95 @@ class WallTapper:
             ws.TOOL_ORI = list(ori)
             io.move_l(back, vel=C.move_vel / 2)
         io.zero_force()                                     # 자세가 바뀌어 공구 무게 영향이 달라짐 → 다시 영점
+
+    def reorient_via_home(self, ori, label, ref_j):
+        """벽에서 rot_clear 물러남 → 홈 (movej) → ori 자세로 가운데(lat_c) 위 경유점 (movej, 바닥 여유 점검)
+        → 수직 하강으로 같은 높이에 도착. 벽 앞에서 손목을 뒤집지 않는다."""
+        io = self.io
+        if not ref_j:
+            raise TapError(f'[자세] {label}: width_ref_j_* 필요 (홈 경유 후 관절 배치)')
+        cur = io.get_pos()
+        io.move_l(cur - ws.APP_DIR * C.rot_clear)
+        target = ws.make_point(self.lat_c, ws.app_of(cur) - C.rot_clear, float(np.dot(cur, ws.UP_DIR)))
+        ref = [float(v) for v in ref_j]
+        ref[0] += ws.DIRECTIONS[ws.DIRECTION][3]            # 벽 방향에 맞춰 J1 회전
+        sol = io.dsr.get_solution_space(io.dsr.posj(*ref))
+        # 홈 → 목표를 관절로 바로 가면 J5 가 +90 → −60 으로 뒤집히며 탐침 끝이 바닥까지 처짐 (run67, z 14 에서 충돌)
+        # → 새 자세의 경유점으로 관절 이동 → 경유점에서 수직 직선 하강해 도착점(경유점 아래, 원래 높이)으로.
+        #   경유점 후보: 높이 +via_dz 씩(위) × 벽 쪽 +via_dx 씩(팔이 펴져 J3 가 줄어듦, run74: 올리기만 하면 J3 135 초과)
+        #   조건: 도착점·경유점 |J3| ≤ j3_max, 홈→경유점 관절 경로가 바닥 위 flip_clear, 벽 앞 standoff 이상 떨어짐
+        up0 = float(np.dot(target, ws.UP_DIR))
+        app0 = ws.app_of(target)
+        app_max = self.face - C.standoff                    # 도착점/경로가 벽에 이보다 가까이 가지 않음 (찍기 시작 위치)
+        n_dx = max(0, int((app_max - app0) // C.via_dx))
+        fails = []
+        found = None
+        for dz in np.arange(0.0, C.reorient_z_max - up0 + 1e-6, C.via_dz):
+            for dx in [i * C.via_dx for i in range(n_dx + 1)]:
+                land = target + ws.APP_DIR * dx
+                via = land + ws.UP_DIR * dz
+                tag = f'z+{dz:.0f}/벽쪽+{dx:.0f}'
+                ql = self._ref_ik(land, ori, sol, ref)
+                if ql is None or abs(float(ql[2])) > C.j3_max:
+                    fails.append(f'{tag}: 도착점 ' + ('도달 불가' if ql is None else f'J3 {ql[2]:.1f}'))
+                    continue
+                qv = ql if dz == 0 else self._ref_ik(via, ori, sol, ref)
+                if qv is None or abs(float(qv[2])) > C.j3_max:
+                    fails.append(f'{tag}: 경유점 ' + ('도달 불가' if qv is None else f'J3 {qv[2]:.1f}'))
+                    continue
+                low, far = self._sweep(ws.HOME_J, qv)
+                if low < self.floor_z + C.flip_clear or far > app_max:
+                    fails.append(f'{tag}: 경로 최저 z {low:.0f} / 벽쪽 최대 {far:.0f}')
+                    continue
+                found = (land, via, qv, dz, dx, low, far)
+                break
+            if found:
+                break
+        if found is None:
+            raise TapError(f'[자세] {label}: 안전한 경유점 없음 (바닥 {self.floor_z:.0f}+{C.flip_clear:.0f}, '
+                           f'벽 {app_max:.0f}, j3_max {C.j3_max:.0f}) 후보 {len(fails)}개: {"; ".join(fails[-6:])}')
+        land, via, qv, dz, dx, low, far = found
+        self.log.info(f'[자세] {label}: TOOL_ORI {list(ws.TOOL_ORI)} → {list(ori)}, 후보 {len(fails) + 1}개째 '
+                      f'(z+{dz:.0f}, 벽쪽+{dx:.0f}) 홈 → 경유점 {np.round(via, 1).tolist()} movej '
+                      f'{np.round(qv, 1).tolist()} (경로 최저 z {low:.0f}, 벽쪽 최대 {far:.0f})'
+                      + (f' → 수직 하강 {dz:.0f}mm' if dz > 0 else ''))
+        io.move_j_reorient(ws.HOME_J)                       # 지금 자세로 홈까지 (run67 에서 문제없던 구간)
+        io.move_j_reorient(qv)                              # 관절 직선 = _sweep 으로 점검한 경로 그대로
+        ws.TOOL_ORI = list(ori)                             # SizeIO._posx 가 이 값을 사용
+        if dz > 0:
+            io.move_l(land)                                 # 새 자세 그대로 수직 하강
+        io.zero_force()                                     # 자세가 바뀌어 공구 무게 영향이 달라짐 → 다시 영점
+
+    def move_over(self, label):
+        """자세(TOOL_ORI)·관절 배치를 그대로 두고 첫 쪽 끝 → 둘째 쪽 시작(가운데)으로 옮긴다. 도구는 계속 벽 쪽을 봄.
+        벽에서 rot_clear 물러남 → 위로 (벽 윗면 + flip_clear) → 가운데로 옆 이동 → 원래 높이로 수직 하강 (모두 movel).
+        움직이기 전에 네 점 모두 지금 관절 배치로 도달 가능 + |J3| ≤ j3_max 인지 확인."""
+        io = self.io
+        cur = io.get_pos()
+        up0 = float(np.dot(cur, ws.UP_DIR))
+        lat0 = float(np.dot(cur, ws.LAT_DIR))
+        app = ws.app_of(cur) - C.rot_clear
+        top = self.res.get('top_z', up0)
+        z_hi = min(max(up0, top + C.flip_clear), C.reorient_z_max)
+        pts = [ws.make_point(lat0, app, up0), ws.make_point(lat0, app, z_hi),
+               ws.make_point(self.lat_c, app, z_hi), ws.make_point(self.lat_c, app, up0)]
+        sol = io.dsr.get_current_solution_space()
+        for p in pts:
+            q = io.joint_at(p, sol)
+            if q is None:
+                raise TapError(f'[자세] {label}: 넘어가는 경로 {np.round(p, 1).tolist()} 에 지금 관절 배치(sol {sol})로 도달 불가')
+            self._check_j3(q, label, p)
+        self.log.info(f'[자세] {label}: 자세 그대로 {list(ws.TOOL_ORI)}, 위로 띄워 넘어감 '
+                      f'z {up0:.0f} → {z_hi:.0f} (윗면 {top:.0f} + {C.flip_clear:.0f}), 옆 {lat0:.0f} → {self.lat_c:.0f}')
+        for p in pts:
+            io.move_l(p)
+        io.zero_force()
+
+    def _check_j3(self, q, label, xyz):
+        """자세 바꾸기 목표 관절값의 J3 가 j3_max 를 넘으면 움직이기 전에 멈춤 (컨트롤러가 일부 구간만 거부해 손목이 반쯤 돈 채 남는 것 방지)."""
+        if abs(float(q[2])) > C.j3_max:
+            raise TapError(f'[자세] {label}: {np.round(xyz, 1).tolist()} 목표 J3 {float(q[2]):.1f}° '
+                           f'(|J3| > j3_max {C.j3_max:.0f}°) → 관절 {np.round(q, 1).tolist()}, 시작 위치/width_ref_j_* 확인')
 
     def _ref_ik(self, xyz, ori, sol, ref):
         """ori 자세로 xyz 에 가는 관절값 (sol 배치). J4/J6 은 ±360° 중 기준(ref)에 가까운 값으로
@@ -839,9 +990,10 @@ class WallTapper:
         low, far = np.inf, -np.inf
         for s in np.linspace(0.0, 1.0, n + 1):
             p = [float(v) for v in dsr.fkin(dsr.posj(*(q0 + (q1 - q0) * s).tolist()), ref=dsr.DR_BASE)]
-            tip = np.asarray(p[:3]) + C.probe_len * ws._tool_dir(p[3:6])
-            low = min(low, float(np.dot(tip, ws.UP_DIR)))
-            far = max(far, ws.app_of(tip))
+            tcp = np.asarray(p[:3])                          # 그리퍼 손끝 (도구가 위를 향하면 끝보다 낮음)
+            tip = tcp + C.probe_len * ws._tool_dir(p[3:6])
+            low = min(low, float(np.dot(tip, ws.UP_DIR)), float(np.dot(tcp, ws.UP_DIR)))
+            far = max(far, ws.app_of(tip), ws.app_of(tcp))
         return low, far
 
     def measure_width(self):
@@ -861,20 +1013,28 @@ class WallTapper:
                       f'{n0_}({"+" if s0 > 0 else "-"}{ax}) 먼저 → {n1_}')
         lines = [{'up': z, 'ok': False, 'taps': 0, 'edges': {}} for z in ups]
         faces = {}
-        ref_used = None
         for k, (sign, key, name) in enumerate(sides):
+            # lean: 양쪽 모두 수평 자세. 양쪽 다 홈을 거쳐 바꿈
+            #   (벽 앞에서 손목을 뒤집으면(set_tool_ori) 여유 확보로 물러나다 J3 한계를 넘고 공구가 바닥에 닿았음, run56)
             if C.width_ori == 'lean':
                 ori = self.side_ori(sign)
                 if key == 'left' and abs(C.width_yaw) < 1e-6:
                     ori[2] = C.width_roll_left
                 ref_j = tuple(C.width_ref_j_left if key == 'left' else C.width_ref_j_right)
-                if np.allclose(ori, ws.TOOL_ORI, atol=1e-3) and (not ref_j or ref_j == ref_used):
-                    self.log.info(f'[자세] 너비 {name}: 이전과 같은 자세/관절 배치 {ws.TOOL_ORI} → 그대로 탐색')
+                j4_now = float(self.io.dsr.get_current_posj()[3])
+                same_cfg = abs((j4_now - ref_j[3] + 180.0) % 360.0 - 180.0) < 90.0   # 지금 J4 가 이쪽 기준 배치와 같은 쪽
+                if k > 0 and np.allclose(ori, ws.TOOL_ORI, atol=1e-3) and same_cfg:
+                    # 둘째 쪽 자세·관절 배치가 첫 쪽과 같음 → 손목 뒤집기(홈 경유) 없이
+                    #   도구는 계속 앞(벽 쪽)을 본 채 위로 띄워 가운데로 넘어감 (run75: 뒤집힌 배치로 내려가다 충돌)
+                    self.move_over(f'너비 {name}')
+                elif k > 0 and not same_cfg:
+                    # 자세는 같아도 관절 배치가 다름 → 이쪽 기준 배치(width_ref_j_*)로 홈 경유
+                    #   (run85: 왼쪽 배치(J4≈-1) 그대로 오른쪽 y −290 까지 가다 J5 가 바닥에 닿음. 오른쪽은 J4≈177 이어야 안전)
+                    self.log.info(f'[자세] 너비 {name}: 지금 J4 {j4_now:.1f}° ≠ 기준 {ref_j[3]:.1f}° → 홈 경유로 배치 바꿈')
+                    self.reorient_via_home(ori, f'너비 {name}', ref_j)
                 else:
-                    self.set_tool_ori(ori, f'너비 {name}: 수평, Z축 둘레 {C.width_yaw:.0f}° ({C.width_lean})',
-                                      ref_j)
-                    ref_used = ref_j
-                self.res[f'tool_ori_width_{key}'] = list(ws.TOOL_ORI)
+                    self.reorient_via_home(ori, f'너비 {name}', ref_j)
+            self.res[f'tool_ori_width_{key}'] = list(ws.TOOL_ORI)
             limit = C.lat_range[1] if sign > 0 else C.lat_range[0]
             lats = np.arange(self.lat_c, limit + sign * 1e-6, sign * 40.0)
             self.check_singularity(self._path_points(lats, ups), f'width_{key}')
@@ -1027,13 +1187,13 @@ def _declare(node):
     C.start = _floats(p('start', ','.join(str(v) for v in C.start)))
     if len(C.start) != 3:
         raise ValueError(f'start 는 "x,y,z" 형식: {C.start}')
-    for name in ('tilt', 'force', 'stall_mm', 'stall_sec', 'max_fc_speed', 'probe_vel', 'move_vel',
+    for name in ('tilt', 'force', 'stall_mm', 'stall_sec', 'flex_mm', 'max_fc_speed', 'probe_vel', 'move_vel',
                  'move_acc', 'approach_vel', 'approach_acc', 'rot_vel', 'rot_acc', 'joint_vel', 'joint_acc', 'reorient_step',
                  'contact', 'k_sigma', 'hyst', 'contact_hold',
                  'floor_depth', 'wall_search', 'lift', 'standoff', 'max_depth', 'step_z', 'step_y',
                  'tol', 'z_limit', 'travel_clear', 'probe_len', 'width_yaw', 'width_tilt', 'width_roll', 'rot_clear', 'stiff_soft', 'stiff_other', 'stiff_rot', 'sing_deg', 'probe_timeout',
                  'true_height', 'true_width', 'free_tau', 'free_hold', 'free_hard', 'free_mhard',
-                 'flip_clear', 'reorient_z_max', 'vbox_face', 'vbox_floor', 'vbox_top', 'vbox_stiff', 'width_z', 'width_roll_left'):
+                 'flip_clear', 'reorient_z_max', 'j3_max', 'via_dz', 'via_dx', 'vbox_face', 'vbox_floor', 'vbox_top', 'vbox_stiff', 'width_z', 'width_roll_left'):
         setattr(C, name, float(p(name, float(getattr(C, name)))))
     for name in ('miss_confirm', 'filter_win', 'noise_samples'):
         setattr(C, name, int(p(name, getattr(C, name))))
@@ -1074,7 +1234,9 @@ def _declare(node):
         raise ValueError('height_lats 는 1개 이상, width_ups 는 0~1 사이 비율 1개 이상')
 
 
-def main(args=None):
+def main(args=None, pre=None, post=None):
+    """pre(io) : 홈 이동 전에 실행할 동작 (예: pick_tap 의 물건 집기). 감시(guard) 붙기 전에 실행됨.
+    post(io): 측정 성공(status ok) + 홈 복귀 뒤 실행할 동작 (예: pick_tap 의 물건 반납)."""
     rclpy.init(args=args)
     DR_init.__dsr__id = ROBOT_ID
     DR_init.__dsr__model = ROBOT_MODEL
@@ -1142,6 +1304,8 @@ def main(args=None):
     try:
         io.setup()
         io.set_singularity(True)
+        if pre is not None:
+            pre(io)
         io.gripper_close()
         io.move_j(ws.HOME_J)
         guard.zero()
@@ -1182,6 +1346,7 @@ def main(args=None):
         safe_shutdown(node, ('힘/순응제어 해제 실패', io.release_press),
                       ('결과 저장 실패', finish),
                       ('홈 복귀 실패', lambda: ws.go_home_after_stop(io, guard, home_policy)),
+                      ('후처리 실패', lambda: post(io) if post is not None and m.status == 'ok' else None),
                       ('특이점 처리 복구 실패', lambda: io.set_singularity(False)),
                       ('RViz 정리 실패', stop_viz))
     sys.exit(0 if m.status == 'ok' else 1)

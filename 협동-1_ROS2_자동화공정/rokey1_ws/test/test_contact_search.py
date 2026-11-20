@@ -133,3 +133,47 @@ def test_base_positive_x_force_request(force, mode):
     assert request.mod == mode
 
 
+
+
+def test_stall_counts_as_contact_under_compliance():
+    """힘이 기준(5 N)에 못 미쳐도 stall_sec 동안 못 나아가면 접촉 (뜨기 벽 탐색 run99: 6.8/10 mm 에서 2.2 N)."""
+    io = FakeIO([(0,)*6] + [(-2.2, 0, 0, 0, 0, 0)]*1000)
+    t = [0.0]
+    poses = iter([100.0 - min(6.8, 2.0*k*0.05) for k in range(1000)])
+    io.read_pose = lambda: (next(poses), *io.pose[1:])
+    result = seek_axis(io, 0, -1, 5, 10, 2, clock=lambda: t[0],
+                       sleep=lambda d: t.__setitem__(0, t[0]+d), confirm=2, stall_mm=0.3, stall_sec=1.0)
+    assert [e[0] for e in io.events] == ['move', 'stop']
+    assert t[0] < 6.0                       # 20 s 시간 초과 전에 끝남
+    assert result[0] < 94.0                 # 막힌 위치 근처
+
+
+def test_no_stall_option_keeps_old_behavior():
+    """stall_sec=0 (기본) 이면 예전처럼 힘으로만 판정 → 막혀 있으면 시간 초과."""
+    io = FakeIO(iter([(0,)*6] + [(-2.2, 0, 0, 0, 0, 0)]*2000))
+    t = [0.0]
+    io.read_pose = lambda: (93.2, *io.pose[1:])
+    with pytest.raises(TimeoutError):
+        seek_axis(io, 0, -1, 5, 10, 2, clock=lambda: t[0], sleep=lambda d: t.__setitem__(0, t[0]+d))
+
+
+def test_floor_search_limited_below_gap_uses_limit_as_floor_then_lifts():
+    """틈 Z + clearance 10 에서 틈 Z −10 까지만 (20 mm). 못 닿으면 그 자리를 바닥으로 보고 0.5 mm 든다."""
+    io = FakeIO([(0,)*6]*10)
+    original = io.read_pose
+    io.read_pose = lambda: io.target if io.target is not None else original()
+    lifted = []
+    io.move_line = lambda step, target, speed, tolerance=2.0: lifted.append(target)
+    a = args()
+    a.floor_below_gap, a.approach_clearance_z, a.floor_lift, a.press_method = 10.0, 10.0, 0.5, 'direct'
+    seek_floor_then_wall(io, a)
+    assert io.events[0][1][2] == 80            # 100 − (10 + 10)
+    assert lifted and lifted[0][2] == 80.5
+
+
+def test_floor_search_contact_before_limit_is_unchanged():
+    io = FakeIO([(0,)*6, (0, 0, 5, 0, 0, 0)])
+    a = args()
+    a.floor_below_gap, a.approach_clearance_z, a.press_method = 10.0, 10.0, 'direct'
+    floor = seek_floor_then_wall(io, a)
+    assert floor[2] == 90                      # 실제 접촉점 (중간에서 정지)

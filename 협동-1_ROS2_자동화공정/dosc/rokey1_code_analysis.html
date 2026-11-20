@@ -109,9 +109,9 @@ html{scroll-behavior:smooth}
 
 <main>
 <header id="summary">
-  <div class="eyebrow">src/rokey1 · 2026-11-18 정리</div>
+  <div class="eyebrow">src/rokey1 · 2026-11-18 정리 · 2026-11-19 HMI 갱신 · bringup 지연 원인 확정</div>
   <h1>rokey1 코드 분석</h1>
-  <p class="lede">벽면 보수 협동로봇(두산 M0609 + RG2) 패키지입니다. 웹 HMI에서 탐색 → 퍼티 → 샌딩 공정을 실행하고, 결과를 MySQL에 기록합니다. 이번 정리에서 중복·고장 파일을 지우고, 공통 상수를 <code>utils</code>와 <code>robot.yaml</code>로 모았고, DB에 연결되지 않았던 탐색 공정을 연결했습니다.</p>
+  <p class="lede">벽면 보수 협동로봇(두산 M0609 + RG2) 패키지입니다. 웹 HMI에서 탐색 → 퍼티 → 샌딩 공정을 실행하고, 결과를 MySQL에 기록합니다. 이번 정리에서 중복·고장 파일을 지우고, 공통 상수를 <code>utils</code>와 <code>robot.yaml</code>로 모았고, DB에 연결되지 않았던 탐색 공정을 연결했습니다. 11-19에는 웹 HMI를 바꿨습니다. <b>sodvir/sodreal 버튼으로 bringup</b>, <b>공정 시작 때 필요한 액션 서버 자동 시작</b>, bringup 없으면 시작 비활성화, 로그 탭 분리, TCP 경로/좌표 전환이 들어갔습니다.</p>
   <div class="stats">
     <div class="stat"><span>Python 파일</span><b>97 → 77</b><small>테스트 포함</small></div>
     <div class="stat"><span>전체 줄 수</span><b>20.9k → 12.0k</b><small>*.py 기준 20,900 → 11,976줄</small></div>
@@ -127,10 +127,13 @@ html{scroll-behavior:smooth}
     <div class="stage"><h4>웹 화면</h4>
       <div class="node"><b>hmi/web</b><small>index.html · main.js</small></div>
       <div class="node"><b>[공정] 탭</b><small>ALL / EXPLORE / PUTTY / SANDING</small></div>
+      <div class="node hot"><b>sodvir · sodreal</b><small>조작 바 → /api/bringup</small></div>
     </div>
     <div class="stage"><h4>HMI 서버 (DB 기록)</h4>
       <div class="node"><b>hmi_server</b><small>HTTP · SSE · 비상정지</small></div>
+      <div class="node hot"><b>_ensure_servers</b><small>없는 액션 서버를 bringup 모드로 켬</small></div>
       <div class="node"><b>process_runner</b><small>/process/* 순서 실행</small></div>
+      <div class="node hot"><b>m0609_rg2_bringup</b><small>HMI 자식 프로세스 (정지로 안 꺼짐)</small></div>
       <div class="node"><b>utils/db.py</b><small>실패 시 pending.jsonl</small></div>
     </div>
     <div class="stage"><h4>공정 액션 서버</h4>
@@ -144,7 +147,7 @@ html{scroll-behavior:smooth}
       <div class="node"><b>MySQL cobot</b><small>run · wall · gap · task_log · quality</small></div>
     </div>
   </div>
-  <p class="legend">주황 테두리: 이번에 추가한 연결. 전에는 <code>/process/explore</code>를 <code>fake_process</code>만 제공해서, 실제 탐색 결과(wall, gap)가 DB에 들어갈 길이 없었습니다.</p>
+  <p class="legend">주황 테두리: 11-18 · 11-19에 추가한 연결. 전에는 <code>/process/explore</code>를 <code>fake_process</code>만 제공해서, 실제 탐색 결과(wall, gap)가 DB에 들어갈 길이 없었습니다. 11-19부터 bringup은 웹 버튼으로 띄우고, 액션 서버는 공정 시작 때 HMI가 켭니다.</p>
 
   <h3>explore_server가 하는 일</h3>
   <ol class="steps">
@@ -163,7 +166,7 @@ html{scroll-behavior:smooth}
       <tr><td><code>navigation</code></td><td class="num">6</td><td class="num">2,481</td><td>벽 탐색은 wall_tap 하나. wall_size(방향·로봇 입출력·홈 복귀 공통), force_guard(충돌 감시), wall_size_rviz(RViz 표시), explore_server(→ DB)</td><td>wall_tap, explore_server</td></tr>
       <tr><td><code>putty_demo</code></td><td class="num">15</td><td class="num">3,273</td><td>헤라 집기 → 퍼티 뜨기/묻히기 → 벽 도포 → 반납. 액션 서버가 작업 노드를 자식 프로세스로 실행</td><td>putty_task_server</td></tr>
       <tr><td><code>sanding</code></td><td class="num">6</td><td class="num">1,490</td><td>도구 집기 → 퍼티가 작업한 틈을 직선 샌딩. 벽 법선은 DB 벽 4점으로 계산(utils/wall.py)</td><td>sanding_server (= tool_task_server)</td></tr>
-      <tr><td><code>hmi</code></td><td class="num">4</td><td class="num">1,411</td><td>웹 HMI 서버, 작업 카탈로그, 공정 실행 + DB 기록</td><td>hmi_server</td></tr>
+      <tr><td><code>hmi</code></td><td class="num">4</td><td class="num">1,423</td><td>웹 HMI 서버(bringup · 액션 서버 자동 시작 포함), 작업 카탈로그, 공정 실행 + DB 기록. 웹 파일 <code>hmi/web</code> (main.js 924줄)</td><td>hmi_server</td></tr>
       <tr><td><code>utils</code></td><td class="num">13</td><td class="num">567</td><td>공통 모듈 (아래 표)</td><td>–</td></tr>
       <tr><td><code>tape</code></td><td class="num">2</td><td class="num">270</td><td>테이프 위치 찾기 / 떼기</td><td>tape_locate, tape_peel</td></tr>
       <tr><td><code>rokey1</code></td><td class="num">4</td><td class="num">280</td><td>간단한 이동·그리퍼 시험, 홈 이동</td><td>move, grip_test, homeset</td></tr>
@@ -172,7 +175,7 @@ html{scroll-behavior:smooth}
       <tr><td><code>test</code></td><td class="num">16</td><td class="num">1,680</td><td>pytest (로봇 호출 없는 단위 시험)</td><td>–</td></tr>
     </tbody>
   </table></div>
-  <p class="legend">큰 파일: wall_tap 1,191 · hmi_server 898 · sanding_job 839 · force_guard 486 · wall_size 357줄.</p>
+  <p class="legend">큰 파일: wall_tap 1,191 · hmi_server 978 · sanding_job 839 · force_guard 486 · wall_size 357줄.</p>
 </section>
 
 <section id="utils">
@@ -259,7 +262,13 @@ html{scroll-behavior:smooth}
     <div class="issue bad"><span class="pill p-bad">높음</span><b>틈 자동 감지가 없습니다</b><p>난수 시뮬레이션이던 gap_detection은 삭제했습니다. 지금은 <code>explore.gaps</code>에 틈 좌표를 직접 넣어야 퍼티·샌딩이 실행됩니다. 비어 있으면 ALL 공정은 탐색만 하고 끝납니다.</p></div>
     <div class="issue bad"><span class="pill p-bad">높음</span><b>putty_load 값이 비어 있어 ALL 공정이 퍼티 단계에서 멈춥니다</b><p>robot.yaml <code>force.putty_load</code>의 값이 null이고 <code>tool_held_confirmed: false</code>입니다. 이 상태에서는 <code>/process/putty_load</code>가 <code>E_FORCE</code>로 거부됩니다. 퍼티 담당이 값을 확정해야 합니다.</p></div>
     <div class="issue warn"><span class="pill p-warn">중간</span><b>Tool 이름 불일치: Tool Weight_1 과 Tool Weight</b><p><code>rokey1/move.py</code>와 <code>grip_test.py</code>만 <code>"Tool Weight_1"</code>을 씁니다. 펜던트에 둘 다 등록돼 있지 않으면 set_tool이 실패하고, 등록돼 있으면 힘 센서 보정 무게가 다릅니다. 펜던트에서 확인이 필요해서 고치지 않았습니다.</p></div>
-    <div class="issue warn"><span class="pill p-warn">중간</span><b>explore_server는 실로봇에서도 y 확인 없이 시작합니다</b><p>웹 시작 버튼을 확인 단계로 보고 wall_tap의 <code>confirm</code>을 껐습니다. 실행 전에 bringup의 mode와 <code>explore_server</code>의 mode를 반드시 같게 맞추세요.</p></div>
+    <div class="issue warn"><span class="pill p-warn">중간</span><b>explore_server는 실로봇에서도 y 확인 없이 시작합니다</b><p>웹 시작 버튼을 확인 단계로 보고 wall_tap의 <code>confirm</code>을 껐습니다. 웹 bringup(sodvir/sodreal)을 쓰면 서버가 그 모드로 켜져 모드가 맞습니다. 터미널에서 띄운 bringup이면 웹에서 누른 버튼과 mode가 같은지 직접 확인해야 합니다(HMI가 외부 bringup의 mode는 알 수 없음).</p></div>
+    <div class="issue ok"><span class="pill p-ok">해결</span><b>액션 서버를 탭마다 손으로 켜야 하던 문제 (E_NO_SERVER)</b><p>공정 ▶ 시작 때 필요한 <code>/process/*</code> 액션이 없으면 그 서버를 bringup 모드로 켜고 준비될 때까지(최대 30 s) 기다립니다. 정지·비상 정지로 서버가 꺼져도 다시 시작만 누르면 됩니다. bringup이 없으면 시작 버튼이 비활성화됩니다(<code>fake:=true</code>는 예외).</p></div>
+    <div class="issue warn"><span class="pill p-warn">중간</span><b><code>src/rokey1_/rokey1</code> 때문에 <code>--packages-select rokey1</code> 빌드가 실패합니다</b><p>같은 이름 패키지가 둘이라 colcon이 거부합니다. <code>colcon build --paths src/rokey_interfaces src/rokey1</code>로 빌드하거나, <code>rokey1_</code>를 지우거나 <code>COLCON_IGNORE</code>를 두세요.</p></div>
+    <div class="issue info"><span class="pill p-info">낮음</span><b>ROS_DOMAIN_ID만으로는 격리되지 않습니다</b><p>서버 PC 셸에 <code>ROS_DISCOVERY_SERVER</code>가 설정돼 있어 다른 <code>ROS_DOMAIN_ID</code>로 띄운 노드도 같은 그래프에 붙습니다. 시험용 노드를 띄울 때 주의하세요. hmi_server는 시작할 때 끝나지 않은 run을 ABORTED로 마감하므로, 공정 중에 두 번째 hmi_server를 띄우면 안 됩니다.</p></div>
+    <div class="issue ok"><span class="pill p-ok">원인 확정</span><b>bringup이 수십 초~수 분 걸리던 문제: 원격 discovery server</b><p><code>Waiting for data on 'robot_description' topic</code> 경고가 반복되던 원인입니다. Jazzy의 controller_manager는 robot_description을 <b>토픽으로만</b> 받으므로, 같은 PC 노드끼리 서로 찾는 시간이 그대로 bringup 지연이 됩니다. 이 PC는 Wi-Fi 너머 원격 discovery server(<code>172.24.0.136:11811</code>, RTT 평균 약 150 ms)를 거칩니다. sodvir 기준 robot_description 수신: 11-18 0.8~3.4 s → 11-19 27~216 s (설정은 같음). 로컬 discovery로 실행하니 <b>0.8 s</b>, 경고 0회, dsr_controller2 활성까지 8.3 s. 에뮬레이터·하드웨어 초기화는 매번 2 s 안이라 원인이 아닙니다. 해결: 혼자 하는 가상 시험은 <code>sodvir_local</code>(실행 순서 참고), 팀 연동이 필요할 때만 원격 서버(가능하면 유선).</p></div>
+    <div class="issue warn"><span class="pill p-warn">중간</span><b>discovery 설정이 다른 노드끼리는 서로 안 보입니다</b><p>bringup을 로컬 discovery로 띄우고 다른 터미널에서 기본 설정으로 <code>ros2 run rokey1 pick_tap</code> 등을 실행하면 <code>Waiting for service dsr_controller2/system/set_robot_mode ...</code>만 반복되고 로봇이 움직이지 않습니다. bringup·HMI·액션 서버·작업 노드를 <b>모두 같은 설정</b>으로 띄우세요. 긴 <code>env -u … \</code> 한 줄은 붙여 넣을 때 잘리기 쉬워(실제로 두 번 발생) 터미널에서 <code>unset</code>/<code>export</code>를 먼저 하는 방법을 권합니다. 확인: <code>tr '\0' '\n' &lt; /proc/&lt;PID&gt;/environ | grep -E 'DISCOVERY|SUPER|RANGE'</code></p></div>
+    <div class="issue info"><span class="pill p-info">참고</span><b>sodreal에서 같은 경고가 끝없이 반복되면 연결 문제입니다</b><p>실로봇(192.168.1.100) 연결이 안 되면 하드웨어 초기화 실패(<code>DRCF connecting ERROR</code>) 뒤 controller_manager가 다시 robot_description 대기로 돌아가 경고가 멈추지 않습니다. 11-19에는 유선 랜 <code>enp2s0</code>이 DOWN이었습니다. 랜 연결 · <code>ping 192.168.1.100</code> 먼저 확인.</p></div>
     <div class="issue ok"><span class="pill p-ok">해결</span><b>샌딩 벽 법선을 벽 4점으로 계산합니다</b><p>Process goal에 <code>wall[12]</code>를 추가했습니다(rokey_interfaces). process_runner가 그 틈의 벽 4점을 보내고, sanding_server가 <code>utils/wall.py</code>의 <code>(오른쪽−왼쪽)×(위−바닥)</code>으로 법선을 구해 툴 자세를 맞춥니다. 퍼티는 아직 +X 벽 전용이라 같은 함수로 법선이 −X에서 5° 넘게 벗어나면 움직이기 전에 거부합니다. 4점이 없으면 <code>E_NO_WALL</code>로 움직이지 않습니다. 탐색 방향(+x/−y 등)과 벽 기울기가 그대로 반영됩니다.</p></div>
     <div class="issue warn"><span class="pill p-warn">중간</span><b>wall_tap이 wall_size의 전역 변수에 의존합니다</b><p><code>configure_direction()</code>이 wall_size 모듈 전역값을 바꿉니다. 한 프로세스에서 두 측정을 같이 돌리면 서로 영향을 줍니다. explore_server는 wall_tap을 별도 프로세스로 실행해서 이 문제를 피합니다.</p></div>
     <div class="issue info"><span class="pill p-info">낮음</span><b>기존 테스트 실패 5건 (putty 3, flake8, pep257)</b><p><code>test_putty_actions.py</code>가 없는 함수 <code>hmi.tasks.putty_arguments</code>와 putty_load 힘 설정을 기대합니다. 이번 정리 전부터 실패하던 테스트입니다.</p></div>
@@ -270,17 +279,33 @@ html{scroll-behavior:smooth}
 
 <section id="web">
   <h2><span class="n">08</span>웹 페이지 구성 (hmi_server)</h2>
-  <p>주소: <code>http://&lt;서버PC IP&gt;:8080</code>. 다른 PC에서 열려면 <code>host:=0.0.0.0</code>으로 띄워야 합니다. 위쪽 탭 두 개(작업 제어판 · 실시간 작업 현황)와 항상 보이는 상태 띠로 되어 있습니다.</p>
+  <p>주소: <code>http://&lt;서버PC IP&gt;:8080</code>. 다른 PC에서 열려면 <code>host:=0.0.0.0</code>으로 띄워야 합니다. 위쪽 탭 두 개(작업 제어판 · 실시간 작업 현황)와 항상 보이는 상태 띠 · 조작 바로 되어 있습니다.</p>
   <div class="tbl"><table>
     <thead><tr><th>위치</th><th>구성요소</th><th>하는 일</th></tr></thead>
     <tbody>
       <tr><td>맨 위</td><td>탭 · 간편/전문가 · 연결 칩 · 시계</td><td>[작업 제어판] / [실시간 작업 현황] 전환(단축키 1, 2). 간편 모드는 작업 실행만 보임. 연결 칩이 초록이면 화면↔서버 연결 정상</td></tr>
-      <tr><td>상태 띠</td><td>현재 작업 · 진행률 · 경과 · 속도 · |F| · <b>전체 정지</b> · <b>비상 정지</b></td><td>어느 탭에서든 보임. 전체 정지 = 실행 중 작업에 정지 요청. 비상 정지(Esc) = move_stop → 작업 노드 강제 종료 → 힘제어 해제, RESET 전까지 새 작업 금지</td></tr>
-      <tr><td rowspan="2">작업 제어판</td><td><b>작업 실행</b> 모듈</td><td>그룹 탭 <code>공정</code> · <code>벽면 탐색</code> · <code>퍼티</code> · <code>샌딩</code> → 작업 선택 → 파라미터 → 모드(가상/실제) → 속도(10~100%, 안전 해제 시 200%) → <b>▶ 시작</b>. 아래에 홈 이동 버튼</td></tr>
+      <tr><td>상태 띠</td><td>상태 · 현재 작업 · 진행률 · 경과 · 속도 · |F|</td><td>어느 탭에서든 보임. 계속 떠 있는 서버와 bringup은 "현재 작업"·경과에서 빠짐(서버만 켜져 있으면 <b>대기</b>)</td></tr>
+      <tr><td>조작 바 (상태 띠 아래, 두 탭 공통)</td><td>모드 칩 · <b>sodvir</b> · <b>sodreal</b> · <b>bringup 끄기</b> · 속도 · <b>▶ 시작</b> · <b>■ 정지</b> · <b>⌂ 홈</b> · <b>비상 정지</b></td><td>모드 칩 = bringup 상태와 모드(실제는 빨간색). sodvir/sodreal = bringup만 실행(모드 결정). 속도 10~100%(🔒 안전 해제 시 200%). 시작·홈은 두산 컨트롤러가 연결돼야 눌림. 시작 버튼 옆에 고른 작업 이름. 정지 = 실행 중 작업과 액션 서버 정지(bringup 유지). 비상 정지(Esc) = move_stop → 작업 노드 강제 종료 → 힘제어 해제, bringup 유지, RESET 전까지 새 작업 금지</td></tr>
+      <tr><td rowspan="2">작업 제어판</td><td><b>작업 실행</b> 모듈</td><td>그룹 탭 <code>공정</code> · <code>벽면 탐색</code> · <code>퍼티</code> · <code>샌딩</code> → 작업 선택 → 파라미터 → 조작 바의 ▶ 시작. 가상/실제 모드 토글은 없앰(sodvir/sodreal이 정함)</td></tr>
       <tr><td>상태 · 통신 · 센서 · 안전 · 실행 기록</td><td>통신: 화면↔서버, 두산 서비스, /joint_states Hz, 로봇 데이터. 센서: Fx/Fy/Fz와 힘 그래프. 안전: 비상정지 상태, 컨트롤러 상태, 오류 수. 실행 기록: 최근 run 목록</td></tr>
-      <tr><td>실시간 작업 현황</td><td>로봇 자세 그림 · 위치/자세/관절 · <b>실시간 로그</b> · 노드 입력</td><td>run_id와 현재 단계(stage) 표시. 로그는 전체/정보/경고/오류 필터. 노드가 y/Enter를 물으면 아래 입력칸이나 [y] [Enter] 버튼으로 답함</td></tr>
+      <tr><td rowspan="2">실시간 작업 현황</td><td><b>TCP 작업 공간</b></td><td><b>경로 보기</b>(위에서 본 BASE XY의 TCP 궤적) / <b>좌표 보기</b>(로봇 자세 그림 viz-arm + 위치·자세·관절) 전환, 선택은 브라우저에 저장. <b>posx 복사</b> = 현재 x,y,z,a,b,c 한 줄</td></tr>
+      <tr><td><b>실시간 로그</b> · 노드 입력</td><td><b>작업 로그</b> / <b>로봇 bringup</b> 탭(서버도 따로 보관해 bringup 출력이 작업 로그를 밀어내지 않음). 전체/정보/경고/오류 필터, <b>⧉ 전체 복사</b>(보고 있는 탭). 노드가 y/Enter를 물으면 아래 입력칸이나 [y] [Enter] 버튼으로 답함</td></tr>
     </tbody>
   </table></div>
+  <h3>경고 팝업 규칙</h3>
+  <p>bringup 출력은 경고·오류 모두 팝업 없이 로그 탭에만 남깁니다. 액션 서버 출력은 경고는 팝업 없이, 오류(서버가 죽음 등)는 팝업. 서버를 정지·비상 정지로 끈 것은 팝업 없음. HMI 자신의 판단(서버 30 s 미준비, bringup 없음)은 오류 팝업.</p>
+  <h3>bringup · 액션 서버 수명</h3>
+  <div class="tbl"><table>
+    <thead><tr><th>동작</th><th>bringup</th><th>액션 서버</th><th>코드</th></tr></thead>
+    <tbody>
+      <tr><td>sodvir / sodreal</td><td>그 모드로 시작. 컨트롤러가 이미 연결돼 있으면(터미널 bringup) 띄우지 않고 모드만 설정. 다른 모드의 bringup·서버가 있으면 거부</td><td>건드리지 않음</td><td><code>TaskManager.bringup</code></td></tr>
+      <tr><td>공정 ▶ 시작</td><td>없으면 시작 거부 ("sodvir / sodreal 을 먼저")</td><td>필요한 <code>/process/*</code>가 없을 때만 그 서버를 켜고 준비까지 최대 30 s 대기</td><td><code>_ensure_servers</code>, <code>tasks.PROCESS_ACTIONS</code> / <code>ACTION_SERVER</code></td></tr>
+      <tr><td>■ 정지 · 비상 정지</td><td>유지 (<code>keep_on_stop</code>)</td><td>정지 / 강제 종료</td><td><code>stop</code>, <code>emergency_stop</code></td></tr>
+      <tr><td>bringup 끄기</td><td>종료</td><td>—</td><td><code>/api/stop {run_id}</code></td></tr>
+      <tr><td>HMI 종료</td><td>종료 (자식 프로세스)</td><td>종료</td><td><code>TaskManager.shutdown</code></td></tr>
+    </tbody>
+  </table></div>
+  <p class="legend">공정 서버 매핑: EXPLORE → explore_server · PUTTY(= putty_load + putty) → putty_task_server · SANDING → tool_task_server · ALL → 셋 다. 이미 액션이 떠 있으면(<code>fake:=true</code>의 fake_process 포함) 서버를 켜지 않습니다. bringup 명령은 <code>tasks.py</code> <code>ROBOT_HOST</code>(virtual 127.0.0.1 · real 192.168.1.100)와 <code>~/.bashrc</code>의 sodvir/sodreal alias와 같습니다.</p>
   <h3>작업 목록 (그룹별)</h3>
   <div class="tbl"><table>
     <thead><tr><th>그룹</th><th>작업</th><th>종류</th><th>설명</th></tr></thead>
@@ -289,14 +314,15 @@ html{scroll-behavior:smooth}
       <tr><td>탐색</td><td>DB</td><td><code>/process/explore</code>만. wall · gap 저장</td></tr>
       <tr><td>퍼티</td><td>DB</td><td>gap_id 한 틈에 putty_load → putty</td></tr>
       <tr><td>샌딩</td><td>DB</td><td>gap_id 한 틈에 sanding (벽 4점으로 법선 계산)</td></tr>
-      <tr><td><code>벽면 탐색</code></td><td>탐색 액션 서버</td><td>서버</td><td>explore_server 실행 (정지할 때까지 켜 둠)</td></tr>
-      <tr><td rowspan="4"><code>퍼티</code></td><td>퍼티 액션 서버</td><td>서버</td><td>putty_task_server (/process/putty_load, /process/putty)</td></tr>
+      <tr><td><code>벽면 탐색</code></td><td>탐색 액션 서버</td><td>서버</td><td>explore_server 수동 실행용 (공정 시작 때는 자동)</td></tr>
+      <tr><td rowspan="4"><code>퍼티</code></td><td>퍼티 액션 서버</td><td>서버</td><td>putty_task_server (/process/putty_load, /process/putty) · 공정 시작 때 자동</td></tr>
       <tr><td>퍼티 전체 순서</td><td>노드</td><td>초기화 → 헤라 집기 (가상 모드는 dry-run)</td></tr>
       <tr><td>초기화</td><td>노드</td><td>initialize_device</td></tr>
       <tr><td>헤라 집기</td><td>노드</td><td>pickup_spatula</td></tr>
-      <tr><td rowspan="2"><code>샌딩</code></td><td>샌딩 액션 서버</td><td>서버</td><td>sanding_server (/process/sanding + /dsr01/tool_task)</td></tr>
+      <tr><td rowspan="2"><code>샌딩</code></td><td>샌딩 액션 서버</td><td>서버</td><td>sanding_server (/process/sanding + /dsr01/tool_task) · 공정 시작 때 자동. [샌딩 작업 실행] 전에는 직접 켬</td></tr>
       <tr><td>샌딩 작업 실행</td><td>액션</td><td>DB 없이 /dsr01/tool_task 로 시작/끝 좌표 직접 지정</td></tr>
-      <tr><td>공통</td><td>홈 위치로 이동</td><td>노드</td><td>homeset (0,0,90,0,90,0)</td></tr>
+      <tr><td rowspan="2">공통 (조작 바 버튼)</td><td>홈 위치로 이동</td><td>노드</td><td>homeset (0,0,90,0,90,0)</td></tr>
+      <tr><td>로봇 bringup</td><td>서버</td><td>m0609_rg2_bringup bringup.launch.py (sodvir / sodreal 버튼)</td></tr>
     </tbody>
   </table></div>
   <p class="legend">DB에 기록되는 것은 <code>공정</code> 그룹 4개뿐입니다. 나머지는 웹 로그와 각 노드의 파일로만 남습니다.</p>
@@ -311,7 +337,7 @@ html{scroll-behavior:smooth}
       <tr><td>홈 이동</td><td>관절 속도·가속도 1~60</td><td>homeset 노드는 값을 검사하지 않음</td></tr>
       <tr><td>샌딩 도구 번호</td><td>1번만</td><td>sanding_server <code>TOOL_POSX</code>에 2, 3번 위치가 없음</td></tr>
       <tr><td>빈 숫자 칸</td><td>거부 ("값을 입력하세요")</td><td>전에는 0으로 바뀌어 그대로 실행됨</td></tr>
-      <tr><td>모드</td><td>웹에서 켠 탐색·퍼티 액션 서버의 모드 ≠ 화면 모드 → 공정 시작 거부</td><td>서버는 켤 때 모드로 동작 → DB <code>run.mode</code>가 실제와 어긋나는 것 방지. 터미널에서 직접 켠 서버는 검사 못 함</td></tr>
+      <tr><td>모드</td><td>웹에서 켠 bringup · 탐색 · 퍼티 서버의 모드 ≠ 요청 모드 → 시작 거부 (서버 · bringup 시작도 같음)</td><td>서버는 켤 때 모드로 동작 → DB <code>run.mode</code>가 실제와 어긋나는 것 방지. 터미널에서 직접 켠 bringup · 서버는 검사 못 함</td></tr>
     </tbody>
   </table></div>
 </section>
@@ -320,29 +346,29 @@ html{scroll-behavior:smooth}
   <h2><span class="n">09</span>실행 순서</h2>
   <p class="legend">팀원에게는 체크 박스가 있는 따로 정리한 실행 가이드(<code>docs/run_guide.html</code>)를 공유하세요.</p>
   <h3>터미널 (서버 PC)</h3>
-<pre><span class="c"># 0) 빌드 — 모든 PC에서 한 번 (Process.action 에 wall 필드가 추가됨)</span>
-colcon build --packages-select rokey_interfaces rokey1 &amp;&amp; source install/setup.bash
+<pre><span class="c"># 0) 빌드 — 모든 PC에서 한 번 (src/rokey1_ 와 이름이 겹쳐 --paths 로)</span>
+colcon build --paths src/rokey_interfaces src/rokey1 &amp;&amp; source install/setup.bash
 
 <span class="c"># 1) DB 확인 (robot.yaml db: host/user/password/database)</span>
 mysql -u cobot -pcobot cobot -e "SHOW TABLES;"     <span class="c"># run, wall, gap, task_log, quality</span>
 
-<span class="c"># 2) bringup (virtual 또는 real)</span>
-ros2 launch dsr_bringup2 dsr_bringup2_rviz.launch.py mode:=virtual host:=127.0.0.1 port:=12345 model:=m0609
-
-<span class="c"># 3) 웹 HMI 서버 (다른 PC에서 접속하면 host:=0.0.0.0)</span>
+<span class="c"># 2) 웹 HMI 서버 (다른 PC에서 접속하면 host:=0.0.0.0). bringup 은 웹 버튼으로</span>
 ros2 launch rokey1 process.launch.py host:=0.0.0.0
-<span class="c">#    로봇 없이 DB 흐름만 시험: ros2 launch rokey1 process.launch.py fake:=true</span></pre>
+<span class="c">#    로봇 없이 DB 흐름만 시험: ros2 launch rokey1 process.launch.py fake:=true  (bringup 없이 시작 허용)</span>
+
+<span class="c"># (혼자 하는 가상 시험) 로컬 discovery — bringup 이 수 분 → 수 초. 다른 PC와 ROS 통신은 안 됨, 웹 8080 접속은 됨</span>
+<span class="c">#    이 터미널에서 띄운 HMI · bringup · 서버 · ros2 run 이 모두 같은 설정을 씀</span>
+unset ROS_DISCOVERY_SERVER ROS_SUPER_CLIENT
+export ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST
+<span class="c">#    터미널 bringup만 로컬로: sodvir_local  (~/.bashrc alias, 터미널 환경은 안 바뀜)</span></pre>
   <h3>웹 페이지에서</h3>
   <ol class="steps">
-    <li>브라우저에서 <code>http://&lt;서버PC IP&gt;:8080</code>을 엽니다. 맨 위 연결 칩과 [통신] 모듈의 <b>두산 서비스</b>가 초록인지, <b>/joint_states</b> Hz가 0이 아닌지 봅니다.</li>
-    <li><b>모드</b>를 bringup과 같게 고릅니다(가상/실제). 실제를 고르면 빨간 경고가 뜹니다. 처음엔 <b>속도</b>를 30~50%로 낮춥니다.</li>
-    <li><b>액션 서버 3개를 먼저 켭니다.</b> 각각 선택 후 ▶ 시작, 끄지 말고 둡니다.
-      <br>[벽면 탐색] → <b>탐색 액션 서버</b> · [퍼티] → <b>퍼티 액션 서버</b> · [샌딩] → <b>샌딩 액션 서버</b>
-      <br>로그에 <code>/process/explore 준비</code>, <code>퍼티 액션 준비</code> 같은 줄이 나오면 준비된 것입니다. 탐색만 할 거면 탐색 서버만 켜도 됩니다.</li>
-    <li>[공정] 탭 → <b>탐색</b> 선택 → 목적 <code>TEST</code>, 재료, 메모 입력 → ▶ 시작. wall_tap이 바닥 → 벽 → 높이 → 너비를 잽니다(실시간 작업 현황 탭에서 로그 확인).</li>
+    <li>브라우저에서 <code>http://&lt;서버PC IP&gt;:8080</code>을 엽니다. 맨 위 연결 칩이 초록인지 봅니다.</li>
+    <li>조작 바에서 <b>sodvir</b>(가상) 또는 <b>sodreal</b>(실제)을 누릅니다. 모드 칩이 <b>bringup 연결됨</b>으로 바뀌고 ▶ 시작이 켜지면 준비된 것입니다. bringup 출력은 로그의 [로봇 bringup] 탭. 처음엔 <b>속도</b>를 30~50%로 낮춥니다.</li>
+    <li>[공정] 탭 → <b>탐색</b> 선택 → 목적 <code>TEST</code>, 재료, 메모 입력 → ▶ 시작. 탐색 서버가 없으면 HMI가 먼저 켭니다(<b>액션 서버 켜는 중</b>). wall_tap이 바닥 → 벽 → 높이 → 너비를 잽니다.</li>
     <li>끝나면 로그에 <code>wall_id=… · gap_id=[…]</code>가 찍힙니다. gap_id가 비어 있으면 <code>robot.yaml explore.gaps</code>에 틈 좌표를 넣고 다시 탐색합니다.</li>
     <li>[공정] → <b>퍼티</b> 또는 <b>샌딩</b> → <b>틈 번호(gap_id)</b>에 위 번호 입력 → ▶ 시작. 한 틈씩 확인한 뒤 <b>전체 공정</b>을 실행합니다.</li>
-    <li>실행 기록(run 목록)에 결과(OK / STOP / E_xxx)와 data_check가 표시됩니다. 문제가 생기면 상태 띠의 <b>전체 정지</b>, 위험하면 <b>비상 정지</b>(Esc) → 원인 해결 후 RESET.</li>
+    <li>실행 기록(run 목록)에 결과(OK / STOP / E_xxx)와 data_check가 표시됩니다. 문제가 생기면 <b>■ 정지</b>, 위험하면 <b>비상 정지</b>(Esc) → 원인 해결 후 RESET → ▶ 시작(꺼진 서버는 자동 재시작).</li>
   </ol>
   <p class="legend">퍼티 단계는 <code>robot.yaml force.putty_load</code> 값이 null이면 E_FORCE로 거부됩니다(퍼티 담당이 값 확정 필요).</p>
 </section>
@@ -360,7 +386,10 @@ ros2 launch rokey1 process.launch.py host:=0.0.0.0
       <tr><td>샌딩 params_json</td><td>{"normal","start","end","press_force"} 생성 확인</td><td><span class="pill p-ok">통과</span></td></tr>
       <tr><td>HMI 파라미터 검사</td><td>gap_id 빈칸·0·1.7 거부, 3 통과 · 메모 201자 거부 · 헤라 0/−5/빈칸 거부 · 홈 속도 0 거부 · 도구 2 거부 · 모드 다른 서버가 있으면 공정 거부</td><td><span class="pill p-ok">통과</span></td></tr>
       <tr><td>main.js 문법</td><td>gjs로 파싱 확인 (브라우저 화면 확인은 안 함)</td><td><span class="pill p-ok">통과</span></td></tr>
-      <tr><td>로봇 실행 시험</td><td>하지 않음. dsr01이 실제 로봇일 수 있어서 노드를 띄우지 않았음</td><td><span class="pill p-info">미실시</span></td></tr>
+      <tr><td>HMI bringup · 서버 자동 시작 (11-19)</td><td>ROS·프로세스를 가짜로 바꾼 시험: sodreal → bringup만 · 서버 없을 때 탐색 시작 → 탐색 서버만 켬 · 전체 공정 → 없는 서버만 켬 · bringup 없으면 거부 · fake처럼 액션이 있으면 그대로 진행 · 다른 모드 거부 · 정지/비상 정지 뒤 bringup만 남음</td><td><span class="pill p-ok">통과</span></td></tr>
+      <tr><td>로그 분리 · 팝업 (11-19)</td><td>bringup 출력 10줄이 작업 로그(보관 3줄 시험)를 밀어내지 않음 · bringup 경고/오류 팝업 없음 · 서버 경고 팝업 없음, 오류 팝업 유지</td><td><span class="pill p-ok">통과</span></td></tr>
+      <tr><td>웹 화면 (11-19)</td><td>main.js gjs 문법 통과, 조작 바 배치 스크린샷 확인(1600·1100px). 시작 비활성화 · 로그 탭 · TCP 경로/좌표 전환은 화면 확인 안 함</td><td><span class="pill p-warn">일부</span></td></tr>
+      <tr><td>로봇 실행 시험</td><td>하지 않음. dsr01이 실제 로봇일 수 있어서 동작 노드를 띄우지 않았음</td><td><span class="pill p-info">미실시</span></td></tr>
     </tbody>
   </table></div>
 
@@ -392,7 +421,7 @@ SELECT step, contact_ratio, force_stats FROM task_log
     <tbody>
       <tr><td><code>data_check = wall/gap 없음</code></td><td>탐색은 됐지만 틈이 없음 → <code>robot.yaml explore.gaps</code> 비어 있음</td></tr>
       <tr><td><code>data_check = task_log 없음</code></td><td>피드백이 하나도 안 옴 → 액션 서버가 goal 전에 실패/거절 (아래 rqt로 확인)</td></tr>
-      <tr><td><code>result = E_NO_SERVER</code></td><td>해당 액션 서버가 안 켜져 있음 → 웹에서 액션 서버 시작</td></tr>
+      <tr><td><code>result = E_NO_SERVER</code></td><td>goal 보낼 때 서버가 없음(실행 중 서버가 죽음 등) → 다시 ▶ 시작하면 HMI가 서버를 켬. 서버가 30 s 안에 안 뜨면 웹 로그에 이유가 남음</td></tr>
       <tr><td><code>result = E_NO_WALL</code></td><td>샌딩: 벽 4점 없음 / 퍼티: 벽이 +X 정면에서 5° 넘게 기울어짐</td></tr>
       <tr><td><code>result = E_DB</code></td><td>wall/gap 저장 실패 → DB 연결 확인</td></tr>
       <tr><td><code>result = ABORTED</code></td><td>실행 중 hmi_server가 꺼짐 (다음 시작 때 자동 마감)</td></tr>
@@ -401,11 +430,11 @@ SELECT step, contact_ratio, force_stats FROM task_log
   </table></div>
 
   <h3>어디서 막혔는지 rqt로 확인</h3>
-  <p>서버 PC나 같은 <code>ROS_DOMAIN_ID</code>의 다른 PC에서 <code>source install/setup.bash</code> 후 실행합니다. 모두 보기만 하는 도구라 로봇을 움직이지 않습니다.</p>
+  <p>서버 PC나 같은 <code>ROS_DOMAIN_ID</code> · <code>ROS_DISCOVERY_SERVER</code> 설정의 다른 PC에서 <code>source install/setup.bash</code> 후 실행합니다. 모두 보기만 하는 도구라 로봇을 움직이지 않습니다.</p>
   <div class="tbl"><table>
     <thead><tr><th>도구</th><th>실행</th><th>무엇을 보나</th></tr></thead>
     <tbody>
-      <tr><td><b>rqt_graph</b></td><td><code>rqt_graph</code></td><td>노드 연결. <code>/rokey1_hmi</code>(hmi_server)와 <code>/explore_server</code>·<code>/dsr01/putty_task_server</code>·<code>/dsr01/rokey1_sanding_server</code> 사이에 <code>/process/…/_action/…</code> 연결이 있는지. 안 보이면 위쪽 Hide 옵션(Debug, Leaf topics 등)을 끄고 Nodes/Topics(all)로 새로고침. <b>연결이 없으면</b> 서버가 안 떴거나 ROS_DOMAIN_ID가 다름</td></tr>
+      <tr><td><b>rqt_graph</b></td><td><code>rqt_graph</code></td><td>노드 연결. <code>/rokey1_hmi</code>(hmi_server)가 둘이면 hmi_server가 중복 실행 중. <code>/rokey1_hmi</code>와 <code>/explore_server</code>·<code>/dsr01/putty_task_server</code>·<code>/dsr01/rokey1_sanding_server</code> 사이에 <code>/process/…/_action/…</code> 연결이 있는지. 안 보이면 위쪽 Hide 옵션(Debug, Leaf topics 등)을 끄고 Nodes/Topics(all)로 새로고침. <b>연결이 없으면</b> 서버가 안 떴거나 ROS_DOMAIN_ID가 다름</td></tr>
       <tr><td><b>rqt_console</b></td><td><code>ros2 run rqt_console rqt_console</code></td><td>모든 노드 로그(/rosout). Severity를 Error/Warn로 거르고 Node 열로 누가 냈는지 확인. 예: <code>explore_server</code>의 E_EXPLORE, <code>wall_tap</code>의 TapError(찍기 시간 초과, 벽 없음), 샌딩의 <code>벽 4점(goal.wall)이 없어…</code></td></tr>
       <tr><td><b>Topic Monitor</b></td><td><code>rqt</code> → Plugins → Topics → Topic Monitor</td><td><code>/process/&lt;이름&gt;/_action/status</code>: 2 실행 중 · 4 성공 · 5 취소 · 6 중단(실패). <code>…/_action/feedback</code>: 마지막 step·error_code — <b>마지막 피드백의 step이 막힌 단계</b>. <code>/dsr01/joint_states</code> Hz가 0이면 bringup 문제, <code>/dsr01/error</code>에 컨트롤러 알람</td></tr>
       <tr><td><b>Service Caller</b></td><td><code>rqt</code> → Plugins → Services → Service Caller</td><td><code>/dsr01/system/get_robot_state</code>(읽기 전용)로 컨트롤러 상태 확인. 안전정지·보호정지면 펜던트에서 해제. <b>move·set 계열 서비스는 호출하지 말 것</b></td></tr>
@@ -421,6 +450,7 @@ ros2 topic hz /dsr01/joint_states</pre>
     <li>웹 실행 기록의 <b>result</b>를 봅니다 → 오류 코드로 어느 공정인지 알 수 있습니다.</li>
     <li>DB <code>task_log</code>에서 <code>success=0</code>인 첫 줄 → <b>단계(step)</b>와 fail_reason.</li>
     <li>task_log가 비어 있으면 rqt_graph / <code>ros2 action info</code>로 서버가 떠 있는지 → rqt_console로 그 서버의 Error 로그.</li>
+    <li>노드가 <code>Waiting for service …</code>만 반복하면 그 노드와 bringup의 discovery 설정이 같은지 봅니다(<code>/proc/&lt;PID&gt;/environ</code>의 <code>ROS_DISCOVERY_SERVER</code> · <code>ROS_AUTOMATIC_DISCOVERY_RANGE</code>).</li>
     <li>로봇이 안 움직였으면 Topic Monitor의 <code>/dsr01/joint_states</code>·<code>/dsr01/error</code>와 Service Caller의 <code>get_robot_state</code>로 컨트롤러 상태.</li>
   </ol>
 </section>

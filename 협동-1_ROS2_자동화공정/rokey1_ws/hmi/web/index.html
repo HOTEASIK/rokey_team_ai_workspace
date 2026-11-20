@@ -36,10 +36,33 @@
           <div class="ms-metric"><span class="label">경과</span><b><em id="monElapsed">0.0</em><small>초</small></b></div>
           <div class="ms-metric"><span class="label">속도</span><b><em id="monSpeed">100</em><small>%</small></b></div>
           <div class="ms-metric"><span class="label">|F|</span><b><em id="monForce">--</em><small>N</small></b></div>
-          <div class="ms-actions">
-            <button class="action-btn stop" id="monStopBtn" title="실행 중인 모든 작업에 정지(SIGINT) 요청"><span>■</span> 전체 정지</button>
-            <button class="ms-estop" id="monEstopBtn" title="모션 즉시 정지 + 작업 노드 강제 종료 (Esc)"><span class="estop-ring">!</span><b id="monEstopLabel">비상 정지</b></button>
+        </div>
+
+        <!-- 조작 바: 두 페이지 공통 (bringup · 속도 · 시작/정지/홈 · 비상 정지) -->
+        <div class="command-bar" id="commandBar">
+          <div class="cb-main">
+          <div class="cb-group cb-bringup">
+            <div class="cb-mode" id="modeChip" title="sodvir / sodreal 로 정해진 실행 모드"><i></i><div><b id="modeChipText">bringup 꺼짐</b><small id="modeChipSub">sodvir 또는 sodreal 을 누르세요</small></div></div>
+            <button class="cb-btn" id="sodvirBtn" title="가상 bringup (sodvir). 액션 서버는 공정 시작 때 자동"><b>sodvir</b><small>가상</small></button>
+            <button class="cb-btn real" id="sodrealBtn" title="실제 로봇 bringup (sodreal). 액션 서버는 공정 시작 때 자동"><b>sodreal</b><small>실제 로봇</small></button>
+            <button class="cb-btn ghost" id="bringupStopBtn" title="HMI 에서 띄운 bringup 종료 (로봇 연결 끊김)"><b>bringup 끄기</b><small>연결 종료</small></button>
           </div>
+          <div class="cb-group cb-speed speed-block" id="speedBlock" title="기본 100% · 100% 초과는 [안전 해제] 후 최대 200%">
+            <span class="label">속도</span>
+            <input type="range" id="speedRange" min="10" max="100" step="5" value="100" />
+            <b class="speed-value"><span id="speedValue">100</span><small>%</small></b>
+            <button class="mini-btn" id="speedDefaultBtn" title="속도를 기본값 100% 로">100%</button>
+            <button class="unlock-btn" id="speedUnlockBtn" title="100% 를 넘는 속도(최대 200%) 사용을 허용합니다">🔒</button>
+            <span class="speed-scale" hidden><span id="speedMid">55%</span><span id="speedMax">100%</span></span>
+            <span class="speed-warning" id="speedWarning" hidden>안전 해제 · 100% 초과</span>
+          </div>
+          <div class="cb-group cb-run">
+            <button class="action-btn start" id="startBtn" title="고른 작업을 시작 (공정은 필요한 액션 서버가 없으면 먼저 켬)"><span>▶</span> 시작 <small id="startTaskName"></small></button>
+            <button class="action-btn stop" id="stopBtn" title="실행 중인 작업과 액션 서버 정지 (bringup 은 유지)"><span>■</span> 정지</button>
+            <button class="action-btn home" id="homeBtn" title="관절 홈 자세(0,0,90,0,90,0)로 이동 · 현재 속도 % 적용"><span>⌂</span> 홈</button>
+          </div>
+          </div>
+          <button class="estop-btn cb-estop" id="estopBtn" title="모션 즉시 정지 + 작업 노드 강제 종료 (bringup 유지). 해제 전까지 새 작업 금지 · Esc"><span class="estop-ring">!</span><span><b id="estopLabel">비상 정지</b><small>Esc</small></span></button>
         </div>
 
         <aside class="control-rail page" id="pageControl">
@@ -82,31 +105,6 @@
             <p class="task-desc" id="taskDesc"></p>
             <div class="param-head"><span class="label">파라미터</span><span class="param-head-note" id="paramChanged"></span><button class="mini-btn" id="resetParamsBtn" title="이 작업의 모든 입력값을 기본값으로 되돌립니다">↺ 기본값으로</button></div>
             <div class="param-grid" id="paramGrid"></div>
-            <div class="mode-toggle">
-              <div><span class="label">실행 모드</span><small class="hint">가상 = 에뮬레이터/미리보기 · 실제 로봇 = 실제로 움직임</small></div>
-              <div class="toggle-buttons"><button data-mode="virtual" class="mode-btn active" title="DSR 에뮬레이터(가상) 또는 dry-run 으로 실행">가상</button><button data-mode="real" class="mode-btn" title="실제 M0609 를 움직입니다">실제 로봇</button></div>
-            </div>
-            <div class="real-warning" id="realWarning" hidden>실제 로봇 모드 · 로봇이 실제로 움직입니다. 주변을 확인하세요.</div>
-
-            <!-- 속도 -->
-            <div class="speed-block" id="speedBlock">
-              <div class="speed-head">
-                <div><span class="label">작업 속도</span><small class="hint">기본 100% · 100% 초과는 [안전 해제] 후 최대 200%</small></div>
-                <b class="speed-value"><span id="speedValue">100</span><small>%</small></b>
-              </div>
-              <div class="speed-row">
-                <input type="range" id="speedRange" min="10" max="100" step="5" value="100" />
-                <button class="mini-btn" id="speedDefaultBtn" title="속도를 기본값 100% 로">100%</button>
-                <button class="unlock-btn" id="speedUnlockBtn" title="100% 를 넘는 속도(최대 200%) 사용을 허용합니다">🔒 안전 해제</button>
-              </div>
-              <div class="speed-scale"><span>10%</span><span id="speedMid">55%</span><span id="speedMax">100%</span></div>
-              <div class="speed-warning" id="speedWarning" hidden>안전 해제 상태 · 100% 초과 속도는 새로 시작하는 작업의 속도 값에 배율로 적용됩니다. 비상 정지 시 자동 잠금.</div>
-            </div>
-
-            <div class="action-row"><button class="action-btn start" id="startBtn" title="선택한 작업을 위 설정으로 시작"><span>▶</span> 시작</button><button class="action-btn stop" id="stopBtn" title="실행 중인 모든 작업에 정지(SIGINT) 요청"><span>■</span> 전체 정지</button></div>
-            <div class="action-row home-row"><button class="action-btn home" id="homeBtn" title="관절 홈 자세(0,0,90,0,90,0)로 이동 (homeset)"><span>⌂</span> 홈 위치로 이동</button></div>
-            <p class="hint action-hint">전체 정지는 작업 노드를 정상 종료합니다. 홈 이동은 관절 (0, 0, 90, 0, 90, 0) 으로 돌아가며 현재 속도 % 가 적용됩니다.</p>
-            <button class="estop-btn" id="estopBtn" title="모션 즉시 정지 + 작업 노드 강제 종료. 해제 전까지 새 작업 금지"><span class="estop-ring">!</span><span><b id="estopLabel">비상 정지</b><small>모션 정지 후 작업 노드 종료 · Esc</small></span></button>
             <div class="control-row"><div class="command-readout"><span class="label">마지막 명령</span><b id="lastCommand">—</b><small id="lastCommandSub">작업을 고르고 시작을 누르세요</small></div></div>
           </section>
 
@@ -166,15 +164,18 @@
           <div class="simulation-card" id="simulationCard">
             <div class="sim-topline">
               <div class="sim-title"><span>TCP 작업 공간</span><small>joint_states · get_current_posx · BASE 기준</small></div>
+              <div class="view-toggle" role="group" aria-label="TCP 보기 전환"><button class="view-btn" data-view="path" title="위에서 본 TCP 이동 경로 (BASE XY)">경로 보기</button><button class="view-btn active" data-view="coords" title="로봇 자세 그림 + 6좌표">좌표 보기</button></div>
               <div class="mission-id"><span>실행</span><b id="runIdValue">—</b><span class="sep">|</span><span>단계</span><b id="stageValue">—</b></div>
             </div>
             <div class="sim-content">
-              <div class="viz-arm"><div class="map-corner tl">로봇 자세 · 오른쪽 앞 위에서 본 모습</div><div class="map-corner br">X·Y·Z mm · 각도 deg</div><svg id="armView" preserveAspectRatio="xMidYMid meet"></svg></div>
+              <div class="viz-arm viz-path" id="pathBox" hidden><div class="map-corner tl">TCP 경로 · 위에서 본 모습 (BASE XY)</div><div class="map-corner br">X·Y mm · 위 = +X</div><svg id="pathView" preserveAspectRatio="xMidYMid meet"></svg></div>
+              <div class="viz-arm" id="armBox"><div class="map-corner tl">로봇 자세 · 오른쪽 앞 위에서 본 모습</div><div class="map-corner br">X·Y·Z mm · 각도 deg</div><svg id="armView" preserveAspectRatio="xMidYMid meet"></svg></div>
               <div class="sim-side">
                 <div class="telemetry-block"><span class="label">위치 (mm)</span><div class="position-values three"><div><b id="posX">--</b><small>X</small></div><div><b id="posY">--</b><small>Y</small></div><div><b id="posZ">--</b><small>Z</small></div></div></div>
                 <div class="telemetry-block"><span class="label">자세 (deg)</span><div class="position-values three"><div><b id="rotA">--</b><small>A</small></div><div><b id="rotB">--</b><small>B</small></div><div><b id="rotC">--</b><small>C</small></div></div></div>
                 <div class="telemetry-block"><span class="label">관절 각도 (deg)</span><div class="joint-list" id="jointList"></div></div>
-                <div class="telemetry-foot"><span>실행 모드</span><b id="modeFoot">가상</b></div>
+                <div class="telemetry-block posx-block"><span class="label">posx</span><code id="posxText">--</code><button class="mini-btn" id="copyPosxBtn" title="x, y, z, a, b, c 를 복사 (샌딩 시작/종료 posx 칸에 붙여 넣기)">posx 복사</button></div>
+                <div class="telemetry-foot"><span>실행 모드</span><b id="modeFoot">—</b></div>
               </div>
             </div>
             <div class="sim-footer">
@@ -187,8 +188,8 @@
 
           <div class="event-console">
             <div class="console-head">
-              <div><h3>실시간 로그 <span id="logCount">00</span></h3></div>
-              <div class="console-tools"><button class="console-filter active" data-filter="ALL">전체</button><button class="console-filter" data-filter="INFO">정보</button><button class="console-filter" data-filter="WARN">경고</button><button class="console-filter" data-filter="ERROR">오류</button><span class="console-divider"></span><label class="auto-scroll"><input type="checkbox" id="autoScroll" checked /> 자동 스크롤</label><label class="auto-scroll" title="경고·오류 로그가 오면 화면에 팝업으로 띄움"><input type="checkbox" id="alertPopup" checked /> 경고 팝업</label></div>
+              <div class="log-channels"><button class="log-channel active" data-channel="main" title="공정·작업·HMI 로그">작업 로그 <span id="logCount">00</span></button><button class="log-channel" data-channel="bringup" title="로봇 bringup(sodvir/sodreal) 출력만">로봇 bringup <span id="bringupCount">00</span><i id="bringupErrDot" hidden></i></button></div>
+              <div class="console-tools"><button class="console-filter active" data-filter="ALL">전체</button><button class="console-filter" data-filter="INFO">정보</button><button class="console-filter" data-filter="WARN">경고</button><button class="console-filter" data-filter="ERROR">오류</button><span class="console-divider"></span><button class="console-filter" id="copyLogsBtn" title="지금 보고 있는 로그 탭 전체를 복사">⧉ 전체 복사</button><button class="console-filter" id="logFullBtn" title="로그를 화면 전체로 크게 보기 (다시 누르면 닫힘)">⛶ 전체 보기</button><span class="console-divider"></span><label class="auto-scroll"><input type="checkbox" id="autoScroll" checked /> 자동 스크롤</label><label class="auto-scroll" title="경고·오류 로그가 오면 화면에 팝업으로 띄움"><input type="checkbox" id="alertPopup" checked /> 경고 팝업</label></div>
             </div>
             <div class="console-table-head"><span>시간</span><span>종류</span><span>출처</span><span>내용</span><span>상태</span></div>
             <div class="console-log" id="consoleLog"></div>
@@ -208,6 +209,12 @@
     </div>
     <div class="toast" id="toast" hidden></div>
     <div class="alert-stack" id="alertStack" aria-live="assertive"><div id="alertList"></div><button class="alert-clear" id="alertClear" hidden>경고 팝업 모두 닫기</button></div>
+    <dialog class="ask-dlg" id="askDlg">
+      <form method="dialog">
+        <p id="askMsg"></p>
+        <div class="ask-btns"><button value="no">아니요</button><button value="yes" class="yes">예</button></div>
+      </form>
+    </dialog>
     <script type="module" src="main.js"></script>
   </body>
 </html>

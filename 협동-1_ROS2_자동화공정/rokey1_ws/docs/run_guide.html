@@ -35,11 +35,12 @@ pre{background:var(--surface);border:1px solid var(--line);border-radius:8px;pad
 pre .c{color:var(--muted)}
 .callout{border:1px solid var(--line);border-left:4px solid var(--warn);background:var(--warn-soft);border-radius:6px;padding:10px 14px;font-size:14px}
 .callout.bad{border-left-color:var(--bad);background:var(--bad-soft)}
+.callout.info{border-left-color:var(--steel);background:var(--steel-soft)}
 .callout b{display:block;margin-bottom:2px}
 /* 단계 */
 ol.steps{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:0;counter-reset:s}
 ol.steps>li{counter-increment:s;display:grid;grid-template-columns:36px minmax(0,1fr);gap:0 14px;position:relative;padding-bottom:20px}
-ol.steps>li::before{content:counter(s);grid-row:1 / span 3;width:30px;height:30px;border-radius:50%;
+ol.steps>li::before{content:counter(s);grid-row:1 / span 4;width:30px;height:30px;border-radius:50%;
   display:grid;place-items:center;font-family:var(--mono);font-weight:600;font-size:13px;
   background:var(--surface);border:2px solid var(--accent);color:var(--accent);position:relative;z-index:1}
 ol.steps>li::after{content:"";position:absolute;left:15px;top:30px;bottom:0;width:2px;background:var(--line)}
@@ -58,6 +59,7 @@ tr:last-child td{border-bottom:0}
 .p-req{background:var(--accent-soft);color:var(--accent)}
 .p-opt{background:var(--steel-soft);color:var(--steel)}
 .p-bad{background:var(--bad-soft);color:var(--bad)}
+.p-ok{background:var(--ok-soft);color:var(--ok)}
 .ui{font-weight:700;color:var(--fg);background:var(--surface);border:1px solid var(--line);border-radius:4px;padding:0 6px;white-space:nowrap}
 footer{font-size:13px;color:var(--muted);border-top:1px solid var(--line);padding-top:14px}
 @media (prefers-reduced-motion:reduce){*{scroll-behavior:auto!important}}
@@ -65,22 +67,23 @@ footer{font-size:13px;color:var(--muted);border-top:1px solid var(--line);paddin
 
 <div class="page">
 <header>
-  <div class="eyebrow">rokey1 · 팀 공유용 · 2026-11-18</div>
+  <div class="eyebrow">rokey1 · 팀 공유용 · 2026-11-19</div>
   <h1>rokey1 실행 순서</h1>
-  <p class="lede">터미널 준비 → 웹 HMI에서 액션 서버 켜기 → 탐색 → 틈 하나씩 퍼티·샌딩 → 전체 공정. 체크 박스는 이 브라우저에만 저장됩니다.</p>
+  <p class="lede">터미널에서는 빌드 · DB 확인 · 웹 HMI만 띄웁니다. 웹에서 <span class="ui">sodvir</span> / <span class="ui">sodreal</span>로 로봇을 연결하고, 공정을 골라 <span class="ui">▶ 시작</span>을 누르면 필요한 액션 서버는 HMI가 알아서 켭니다. 탐색 → 틈 하나씩 퍼티·샌딩 → 전체 공정 순서로 확인하세요. 체크 박스는 이 브라우저에만 저장됩니다.</p>
 </header>
 
-<div class="callout bad"><b>실제 로봇을 움직이기 전에</b>bringup의 mode, 웹의 모드 버튼, 액션 서버를 켤 때의 모드가 모두 같아야 합니다. 처음 실행은 속도 30~50%, 하드웨어 비상정지 버튼을 손 닿는 곳에 두세요. 웹의 비상 정지는 소프트웨어 정지일 뿐입니다.</div>
+<div class="callout bad"><b>실제 로봇을 움직이기 전에</b>처음 실행은 속도 30~50%, 하드웨어 비상정지 버튼을 손 닿는 곳에 두세요. 웹의 비상 정지는 소프트웨어 정지일 뿐입니다. 모드는 누른 버튼(sodvir = 가상, sodreal = 실제)으로 정해지고 액션 서버도 같은 모드로 켜집니다. 터미널에서 bringup을 따로 띄웠다면 그 mode와 웹에서 누른 버튼이 같은지 직접 확인해야 합니다.</div>
 
 <section>
   <h2><span class="tag">A</span>터미널 준비 (서버 PC)</h2>
   <ol class="steps">
     <li>
       <h3>빌드 — 모든 팀원 PC에서 한 번</h3>
-      <p>액션 메시지(<code>Process.action</code>)에 <code>wall</code> 필드가 추가됐습니다. 한 PC라도 옛 빌드면 액션 통신이 안 됩니다.</p>
+      <p>액션 메시지(<code>Process.action</code>)에 <code>wall</code> 필드가 있습니다. 한 PC라도 옛 빌드면 액션 통신이 안 됩니다.</p>
 <pre>cd ~/ws_cobot_pjt/ws_dsr
-colcon build --packages-select rokey_interfaces rokey1
+colcon build --paths src/rokey_interfaces src/rokey1
 source install/setup.bash</pre>
+      <p><code>src/rokey1_/rokey1</code>도 패키지 이름이 <code>rokey1</code>이라 <code>--packages-select rokey1</code>은 "이름 중복"으로 실패합니다. 위처럼 <code>--paths</code>로 빌드하거나, <code>rokey1_</code> 폴더를 지우거나 그 안에 빈 <code>COLCON_IGNORE</code> 파일을 두세요.</p>
       <label class="check"><input type="checkbox" id="c-build"> 빌드 성공, 새 터미널마다 source 함</label>
     </li>
     <li>
@@ -90,17 +93,10 @@ source install/setup.bash</pre>
       <label class="check"><input type="checkbox" id="c-db"> 테이블 5개가 보임</label>
     </li>
     <li>
-      <h3>로봇 bringup</h3>
-<pre><span class="c"># 가상 (에뮬레이터)</span>
-ros2 launch dsr_bringup2 dsr_bringup2_rviz.launch.py mode:=virtual host:=127.0.0.1 port:=12345 model:=m0609
-<span class="c"># 실제 로봇이면 mode:=real 과 컨트롤러 IP</span></pre>
-      <label class="check"><input type="checkbox" id="c-bringup"> RViz에 로봇이 보이고 오류 없음</label>
-    </li>
-    <li>
       <h3>웹 HMI 서버</h3>
 <pre>ros2 launch rokey1 process.launch.py host:=0.0.0.0     <span class="c"># 다른 PC에서도 접속</span>
 <span class="c"># 로봇 없이 DB 흐름만: ros2 launch rokey1 process.launch.py fake:=true</span></pre>
-      <p>브라우저 주소: <code>http://&lt;서버 PC IP&gt;:8080</code></p>
+      <p>브라우저 주소: <code>http://&lt;서버 PC IP&gt;:8080</code>. 로봇 bringup은 터미널에서 띄우지 않아도 됩니다(B-2에서 웹 버튼으로).</p>
       <label class="check"><input type="checkbox" id="c-hmi"> 웹 페이지가 열림</label>
     </li>
   </ol>
@@ -110,47 +106,57 @@ ros2 launch dsr_bringup2 dsr_bringup2_rviz.launch.py mode:=virtual host:=127.0.0
   <h2><span class="tag">B</span>웹 HMI에서</h2>
   <ol class="steps">
     <li>
-      <h3>연결 상태 보기</h3>
-      <p>맨 위 연결 칩이 초록인지, <span class="ui">통신</span> 모듈의 <b>두산 서비스</b>가 연결이고 <b>/joint_states</b>가 0 Hz가 아닌지 봅니다.</p>
-      <label class="check"><input type="checkbox" id="c-link"> 화면↔서버, 두산 서비스, joint_states 정상</label>
+      <h3>화면 연결 보기</h3>
+      <p>맨 위 연결 칩이 초록(<b>서버 연결됨</b>)인지 봅니다. 상단 조작 바의 모드 칩은 아직 <b>bringup 꺼짐</b>이고, <span class="ui">▶ 시작</span> · <span class="ui">⌂ 홈</span>은 눌리지 않는 상태(<b>bringup 필요</b>)가 정상입니다.</p>
+      <label class="check"><input type="checkbox" id="c-link"> 화면↔서버 연결됨</label>
     </li>
     <li>
-      <h3>모드와 속도</h3>
-      <p><span class="ui">작업 실행</span> 모듈 아래 모드를 bringup과 같게(<span class="ui">가상</span> / <span class="ui">실제</span>) 고릅니다. 속도 슬라이더는 처음엔 30~50%.</p>
-      <label class="check"><input type="checkbox" id="c-mode"> 모드 = bringup mode, 속도 낮춤</label>
+      <h3>로봇 연결: sodvir / sodreal</h3>
+      <p>상단 조작 바에서 가상이면 <span class="ui">sodvir</span>, 실제 로봇이면 <span class="ui">sodreal</span>(컨트롤러 <code>192.168.1.100</code>). <code>~/.bashrc</code>의 같은 이름 alias와 같은 명령(<code>m0609_rg2_bringup bringup.launch.py</code>)을 HMI가 실행합니다.</p>
+      <p>몇 초 뒤 모드 칩이 <b>가상 · bringup 연결됨</b>(실제면 빨간색 <b>실제 로봇</b>)으로 바뀌고 시작 버튼이 켜집니다. bringup 출력은 <span class="ui">실시간 작업 현황</span> → 로그의 <span class="ui">로봇 bringup</span> 탭에만 나옵니다(작업 로그와 섞이지 않음, 경고 팝업도 안 뜸).</p>
+      <p>터미널에서 이미 bringup을 띄웠다면 버튼을 눌러도 bringup을 또 띄우지 않고 화면 모드만 바꿉니다(모드 칩: <b>외부 bringup</b>).</p>
+      <label class="check"><input type="checkbox" id="c-bringup"> 모드 칩 = 원하는 모드, 통신 모듈의 두산 서비스 정상, /joint_states 0 Hz 아님</label>
     </li>
     <li>
-      <h3>액션 서버 3개 켜기 (모드를 정한 뒤에)</h3>
-      <p>각 탭에서 선택하고 <span class="ui">▶ 시작</span>. 끝나는 작업이 아니라 계속 켜 두는 서버입니다. 서버는 켤 때의 모드로 동작하므로, 모드를 바꿨으면 정지 후 다시 켭니다.</p>
-      <div class="tbl"><table>
-        <thead><tr><th>탭</th><th>작업</th><th>로그에 나오면 준비 완료</th></tr></thead>
-        <tbody>
-          <tr><td><span class="ui">벽면 탐색</span></td><td>탐색 액션 서버</td><td><code>/process/explore 준비</code></td></tr>
-          <tr><td><span class="ui">퍼티</span></td><td>퍼티 액션 서버</td><td><code>퍼티 액션 준비</code></td></tr>
-          <tr><td><span class="ui">샌딩</span></td><td>샌딩 액션 서버</td><td>goal 대기 로그 (RG2 /onrobot 필요)</td></tr>
-        </tbody>
-      </table></div>
-      <label class="check"><input type="checkbox" id="c-servers"> 필요한 서버가 실행 중 (탐색만 할 땐 탐색 서버만)</label>
+      <h3>속도</h3>
+      <p>조작 바의 속도 슬라이더를 처음엔 30~50%로 낮춥니다. 실행 중에도 바로 적용됩니다.</p>
+      <label class="check"><input type="checkbox" id="c-speed"> 속도 낮춤</label>
     </li>
     <li>
       <h3>탐색</h3>
-      <p><span class="ui">공정</span> 탭 → <b>탐색</b> → 아래 파라미터 입력 → <span class="ui">▶ 시작</span>. 로봇이 바닥 → 벽 → 높이 → 너비를 찍어서 잽니다. <span class="ui">실시간 작업 현황</span> 탭에서 로그를 봅니다.</p>
-      <p>끝나면 로그에 <code>wall_id=… · gap_id=[…]</code>가 찍힙니다. <b>이 gap_id를 적어 두세요.</b> 비어 있으면 <code>robot.yaml</code>의 <code>explore.gaps</code>에 틈 좌표를 넣고 다시 탐색합니다(틈 자동 감지는 아직 없음).</p>
+      <p><span class="ui">공정</span> 탭 → <b>탐색</b> → 파라미터 입력 → <span class="ui">▶ 시작</span>. 탐색 액션 서버가 꺼져 있으면 HMI가 먼저 켜고(상태 띠에 <b>액션 서버 켜는 중</b>) 준비되면 바로 시작합니다. 로봇이 바닥 → 벽 → 높이 → 너비를 찍어서 잽니다.</p>
+      <p>끝나면 작업 로그에 <code>wall_id=… · gap_id=[…]</code>가 찍힙니다. <b>이 gap_id를 적어 두세요.</b> 비어 있으면 <code>robot.yaml</code>의 <code>explore.gaps</code>에 틈 좌표를 넣고 다시 탐색합니다(틈 자동 감지는 아직 없음).</p>
       <label class="check"><input type="checkbox" id="c-explore"> 결과 OK, gap_id 확인함</label>
     </li>
     <li>
       <h3>틈 하나로 퍼티 → 샌딩</h3>
-      <p><span class="ui">공정</span> → <b>퍼티</b> → <b>틈 번호 (gap_id)</b>에 위 번호 → 시작. 끝나면 같은 번호로 <b>샌딩</b>. 샌딩은 그 틈의 벽 4점으로 벽 방향을 계산하고, 누르는 힘은 <code>robot.yaml force.sanding.press_force</code> 값을 씁니다.</p>
+      <p><span class="ui">공정</span> → <b>퍼티</b> → <b>틈 번호 (gap_id)</b>에 위 번호 → 시작. 끝나면 같은 번호로 <b>샌딩</b>. 퍼티·샌딩 서버도 처음 시작할 때 자동으로 켜집니다(샌딩은 RG2 <code>/onrobot</code> 필요). 샌딩은 그 틈의 벽 4점으로 벽 방향을 계산하고, 누르는 힘은 <code>robot.yaml force.sanding.press_force</code> 값을 씁니다.</p>
       <label class="check"><input type="checkbox" id="c-one"> 한 틈 퍼티·샌딩 OK</label>
     </li>
     <li>
       <h3>전체 공정</h3>
-      <p><span class="ui">공정</span> → <b>전체 공정</b>. 탐색 → 틈마다 퍼티 → 틈마다 샌딩 순서로, 실패하면 그 자리에서 멈춥니다(재시도 없음).</p>
+      <p><span class="ui">공정</span> → <b>전체 공정</b>. 꺼져 있는 서버(탐색·퍼티·샌딩)를 모두 켠 뒤 탐색 → 틈마다 퍼티 → 틈마다 샌딩 순서로 진행하고, 실패하면 그 자리에서 멈춥니다(재시도 없음).</p>
       <label class="check"><input type="checkbox" id="c-all"> 전체 공정 OK</label>
     </li>
     <li>
       <h3>결과 보기 · 멈추기</h3>
-      <p><span class="ui">실행 기록</span>에 결과(OK / STOP / E_xxx)가 남습니다. 멈출 땐 상단의 <span class="ui">■ 전체 정지</span>, 위험하면 <span class="ui">비상 정지</span>(Esc) → 원인 해결 후 RESET.</p>
+      <p><span class="ui">실행 기록</span>에 결과(OK / STOP / E_xxx)가 남습니다. 멈출 땐 <span class="ui">■ 정지</span>, 위험하면 <span class="ui">비상 정지</span>(Esc) → 원인 해결 후 RESET.</p>
+      <div class="tbl"><table>
+        <thead><tr><th>누른 것</th><th>공정 · 액션 서버</th><th>bringup</th><th>다시 시작</th></tr></thead>
+        <tbody>
+          <tr><td><span class="ui">■ 정지</span></td><td>정지 (서버도 꺼짐)</td><td>유지</td><td><span class="ui">▶ 시작</span>만 누르면 서버 자동 재시작</td></tr>
+          <tr><td><span class="ui">비상 정지</span></td><td>move_stop → 강제 종료</td><td>유지</td><td>RESET → <span class="ui">▶ 시작</span></td></tr>
+          <tr><td><span class="ui">bringup 끄기</span></td><td>—</td><td>종료 (로봇 연결 끊김)</td><td><span class="ui">sodvir</span>/<span class="ui">sodreal</span></td></tr>
+          <tr><td>HMI 종료 (터미널 Ctrl+C)</td><td>종료</td><td>HMI가 띄운 bringup도 종료</td><td>HMI 다시 실행 → B-2부터</td></tr>
+        </tbody>
+      </table></div>
+      <label class="check"><input type="checkbox" id="c-stop"> 정지 / 비상 정지 동작 확인</label>
+    </li>
+    <li>
+      <h3>현황 화면 보조 기능</h3>
+      <p><span class="ui">실시간 작업 현황</span> 탭:</p>
+      <p>· <b>TCP 작업 공간</b> 오른쪽 위 <span class="ui">경로 보기</span> / <span class="ui">좌표 보기</span> — 위에서 본 TCP 이동 경로, 또는 로봇 자세 그림 + 위치·자세·관절 6좌표. <span class="ui">posx 복사</span>로 현재 <code>x, y, z, a, b, c</code>를 복사해 샌딩의 시작/종료 posx 칸에 붙여 넣을 수 있습니다.</p>
+      <p>· <b>로그</b> — <span class="ui">작업 로그</span> / <span class="ui">로봇 bringup</span> 탭, 정보·경고·오류 필터, <span class="ui">⧉ 전체 복사</span>(보고 있는 탭 전체를 복사, 문제 보고할 때 붙여 넣기).</p>
     </li>
   </ol>
 </section>
@@ -166,7 +172,7 @@ ros2 launch dsr_bringup2 dsr_bringup2_rviz.launch.py mode:=virtual host:=127.0.0
       <tr><td>메모</td><td>4개 공정 모두</td><td>바꾼 조건 등 (예: <code>press 15N</code>). 200자까지 입력됩니다</td><td><span class="pill p-opt">선택 입력</span></td></tr>
     </tbody>
   </table></div>
-  <p style="margin-top:10px">숫자 칸은 칸 아래 설명에 범위(예: <code>1 이상 · 정수</code>)가 나오고, 비우거나 범위를 벗어나면 시작할 때 어느 칸이 왜 틀렸는지 알려 주고 실행하지 않습니다. 액션 서버와 화면 모드가 다르면 공정 시작이 막힙니다. 파라미터 영역 오른쪽 위 <span class="ui">↺ 기본값으로</span> 버튼으로 되돌릴 수 있고, 기본값에서 바뀐 칸은 강조 표시됩니다. 틈 번호 외의 입력값은 브라우저에 저장돼 다음에도 남아 있습니다.</p>
+  <p style="margin-top:10px">숫자 칸은 칸 아래 설명에 범위(예: <code>1 이상 · 정수</code>)가 나오고, 비우거나 범위를 벗어나면 시작할 때 어느 칸이 왜 틀렸는지 알려 주고 실행하지 않습니다. 이미 켜진 액션 서버나 bringup이 다른 모드면 공정 시작이 막힙니다. 파라미터 영역 오른쪽 위 <span class="ui">↺ 기본값으로</span> 버튼으로 되돌릴 수 있고, 기본값에서 바뀐 칸은 강조 표시됩니다. 틈 번호 외의 입력값은 브라우저에 저장돼 다음에도 남아 있습니다.</p>
 </section>
 
 <section>
@@ -174,12 +180,16 @@ ros2 launch dsr_bringup2 dsr_bringup2_rviz.launch.py mode:=virtual host:=127.0.0
   <div class="tbl"><table>
     <thead><tr><th>결과 / 증상</th><th>원인 · 할 일</th></tr></thead>
     <tbody>
-      <tr><td><code>E_NO_SERVER</code></td><td>그 공정의 액션 서버가 안 켜짐 → B-3</td></tr>
+      <tr><td>시작 버튼이 안 눌림 (<b>bringup 필요</b>)</td><td>두산 컨트롤러가 연결 안 됨 → <span class="ui">sodvir</span>/<span class="ui">sodreal</span>. 눌렀는데 계속이면 <span class="ui">로봇 bringup</span> 로그 탭에서 오류 확인 (실제 로봇: 컨트롤러 IP·전원)</td></tr>
+      <tr><td><code>… 모드로 실행 중입니다</code></td><td>다른 모드의 bringup/서버가 켜져 있음 → <span class="ui">bringup 끄기</span>(서버는 <span class="ui">■ 정지</span>) 후 다시</td></tr>
+      <tr><td><code>30s 동안 액션 서버 준비 안 됨</code></td><td>자동으로 켠 서버가 뜨지 못함 → 작업 로그에서 그 서버의 오류 줄 확인 (샌딩: RG2 /onrobot)</td></tr>
+      <tr><td><code>E_NO_SERVER</code></td><td>goal을 보낼 서버가 없음 (서버가 실행 중 죽음, 또는 터미널에서 직접 띄운 서버가 꺼짐) → 다시 <span class="ui">▶ 시작</span></td></tr>
       <tr><td><code>E_NO_GAP</code></td><td>gap_id가 DB에 없음, 또는 explore.gaps 비어 있음</td></tr>
       <tr><td><code>E_NO_WALL</code></td><td>샌딩: 벽 4점 없음 · 퍼티: 벽이 +X 정면에서 5° 넘게 기울어짐</td></tr>
       <tr><td><code>E_FORCE</code> (퍼티)</td><td><code>robot.yaml force.putty_load</code> 값이 비어 있음 → 퍼티 담당이 값 확정</td></tr>
       <tr><td><code>E_DB</code></td><td>DB 연결 또는 저장 실패 → <code>~/ws_cobot_pjt/logs/pending.jsonl</code>, <code>rejected.jsonl</code> 확인</td></tr>
-      <tr><td>어디서 막혔는지</td><td>DB: <code>SELECT step, success, error_code, fail_reason FROM task_log WHERE run_id=… ORDER BY log_id;</code>에서 <code>success=0</code> 첫 줄<br>ROS: <code>ros2 action list -t</code>, <code>rqt_console</code>(Error 필터), <code>rqt_graph</code></td></tr>
+      <tr><td>빌드 "duplicate package names"</td><td><code>src/rokey1_</code> 때문 → A-1의 <code>--paths</code> 빌드</td></tr>
+      <tr><td>어디서 막혔는지</td><td>웹: 로그 <span class="ui">⧉ 전체 복사</span>로 공유<br>DB: <code>SELECT step, success, error_code, fail_reason FROM task_log WHERE run_id=… ORDER BY log_id;</code>에서 <code>success=0</code> 첫 줄<br>ROS: <code>ros2 action list -t</code>, <code>rqt_console</code>(Error 필터), <code>rqt_graph</code></td></tr>
     </tbody>
   </table></div>
 </section>

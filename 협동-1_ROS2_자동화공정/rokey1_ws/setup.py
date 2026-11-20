@@ -41,12 +41,12 @@ setup(
             'hmi_server = hmi.hmi_server:main',
             # ===== navigation =====
             'wall_tap = navigation.wall_tap:main',
+            'pick_tap = navigation.pick_tap:main',   # 물건 집기 → 관절 0 → 홈 → wall_tap → 홈
             'explore_server = navigation.explore_server:main',   # /process/explore (wall_tap → DB)
             # ===== putty_demo =====
             'initialize_device = putty_demo.initialize_device:main',
             'pickup_spatula = putty_demo.pickup_spatula:main',
             'scoop_putty = putty_demo.scoop_putty:main',
-            'load_putty = putty_demo.load_putty:main',
             'apply_putty_plane = putty_demo.apply_putty_plane:main',
             'return_spatula = putty_demo.return_spatula:main',
             'putty_task_server = putty_demo.putty_task_server:main',

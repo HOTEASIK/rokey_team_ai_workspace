@@ -14,13 +14,15 @@ WALL_TILT_MAX_DEG = 5.0
 COMMON = {'--transfer-speed': 1, '--transfer-z': 1}
 OPTIONS = {
     'initialize': {},
-    'pickup': {**COMMON, '--clearance': 1, '--settle': 1, '--pick-speed': 1},
+    'pickup': {**COMMON, '--clearance': 1, '--settle': 1, '--pick-speed': 1,
+               '--joint-speed': 1, '--joint-acceleration': 1},
     'scoop': {**COMMON, '--taught-pose': 6, '--lift': 1, '--entry-height': 1,
-              '--reference-blade-angle': 1, '--scoop-angle': 1, '--entry-angle': 1,
+              '--scoop-angle': 1, '--entry-angle': 1,
               '--scoop-speed': 1, '--acceleration': 1, '--edge-offset': 3,
-              '--path': 1, '--container-center': 3, '--container-size': 3,
-              '--blade-width': 1, '--blade-length': 1, '--scoop-depth': 1,
-              '--scoop-distance': 1, '--surface-z': 1, '--samples': 1},
+              '--scoop-pass': 1, '--wall-scrape-height': 1,
+              '--wall-contact-force': 1, '--wall-stall-mm': 1, '--wall-stall-sec': 1,
+              '--scoop-pass-step': 1, '--wall-search-margin': 1, '--wall-search-speed': 1,
+              '--wall-push-force': 1, '--wall-contact-confirm': 1, '--scrape-stiffness': 6},
     'apply': {**COMMON, '--start': 3, '--end': 3, '--stroke-height': 1,
               '--blade-angle': 1, '--blade-end-angle': 1, '--samples': 1,
               '--approach-distance': 1, '--contact-search': 0,
@@ -29,28 +31,31 @@ OPTIONS = {
               '--force-wait-timeout': 1, '--force-stable-time': 1,
               '--force-loss-timeout': 1, '--apply-speed': 1,
               '--acceleration': 1, '--edge-offset': 3, '--plane': 1,
-              '--normal-sign': 1, '--surface-z': 1, '--force-mode': 1, '--force-stiffness': 6},
-    'load': {'--joint-speed': 1, '--joint-acceleration': 1, '--transfer-z': 1, '--transfer-speed': 1, '--contact-pose': 6, '--force-stiffness': 6, **{
-        '--'+name: 1 for name in ('approach-height', 'distance', 'search-distance', 'search-speed',
-        'contact-force', 'hold-force', 'force-limit', 'force-tolerance', 'force-wait-timeout',
-        'force-stable-time', 'force-loss-timeout', 'scrape-speed', 'lift', 'lift-speed', 'acceleration')}},
+              '--normal-sign': 1, '--force-mode': 1, '--force-stiffness': 6,
+              # 2026-11-18 인수인계본의 벽 접근·누르기 옵션. 팀 Process 경로가 YAML에서 이 옵션들을
+              # 만들어 넘기므로 허용 목록에도 있어야 요청이 거부되지 않는다.
+              '--wall-approach-z': 1, '--approach-clearance-z': 1, '--wall-backoff': 1,
+              '--floor-lift': 1, '--floor-below-gap': 1, '--contact-confirm': 1, '--press-method': 1,
+              '--press-stiffness': 1, '--press-tolerance': 1, '--force-limit': 1,
+              '--joint-speed': 1, '--joint-acceleration': 1},
     'return': {**COMMON, '--place-speed': 1, '--settle': 1,
-               '--surface-z': 1, '--edge-offset': 3},
+               '--joint-speed': 1, '--joint-acceleration': 1,
+               '--contact-force': 1, '--search-speed': 1, '--contact-confirm': 1, '--seat-tolerance': 1},
 }
 # pickup에는 transfer-z CLI 옵션이 없다.
 OPTIONS['pickup'].pop('--transfer-z')
-CHOICES = {'--path': ('taught', 'geometry'), '--plane': ('xy', 'yz', 'xz'),
-           '--normal-sign': ('positive', 'negative'), '--force-mode': ('absolute', 'relative')}
+CHOICES = {'--plane': ('xy', 'yz', 'xz'),
+           '--normal-sign': ('positive', 'negative'), '--force-mode': ('absolute', 'relative'),
+           '--press-method': ('direct', 'hybrid', 'position', 'force')}
 
 
 def worker_command(goal):
     """Action Goal을 검증하고 shell=False용 argv를 돌려준다."""
     if goal.task not in MODULES:
-        raise ValueError('지원 작업: initialize, pickup, scoop, load, apply, return')
-    if goal.task == 'return' and not goal.virtual_mode:
-        raise ValueError('현재 헤라 반납은 가상 컨트롤러 전용입니다.')
-    if goal.task in ('scoop', 'load') and not goal.virtual_mode and not goal.tool_held_confirmed:
-        raise ValueError('실물 퍼티 뜨기/묻히기는 tool_held_confirmed=true 파지 확인이 필요합니다.')
+        raise ValueError('지원 작업: initialize, pickup, scoop, apply, return')
+    # 반납은 2026-11-19부터 실물도 허용한다. 실물은 바닥 접촉을 힘으로 감지해 내려놓는다(return_spatula).
+    if goal.task == 'scoop' and not goal.virtual_mode and not goal.tool_held_confirmed:
+        raise ValueError('실물 퍼티 뜨기는 tool_held_confirmed=true 파지 확인이 필요합니다.')
     tokens = list(goal.arguments)
     if len(tokens) > 100:
         raise ValueError('작업 인자가 너무 많습니다.')
@@ -75,12 +80,6 @@ def worker_command(goal):
         args = ['--execute-motion', *tokens]
         if goal.task == 'pickup' and goal.virtual_mode:
             args.append('--virtual-gripper')
-        if goal.task == 'load':
-            from .load_putty import make_parser, validate
-            try:
-                validate(make_parser().parse_args(args))
-            except SystemExit as exc:
-                raise ValueError('판 묻히기 필수 설정값이 필요합니다.') from exc
         if goal.task == 'apply':
             # 현재 실물 벽 도포의 탐색/힘 검증을 액션에서도 생략하지 않는다.
             if '--contact-search' not in tokens and (not goal.virtual_mode or
@@ -102,12 +101,66 @@ def worker_command(goal):
     return [sys.executable, '-u', '-m', 'putty_demo.action_worker', goal.task, *args]
 
 
-def process_putty_goal(request, settings, virtual_mode=False):
-    """팀 Process Goal의 홈 좌표를 현장 도포 작업에 전달한다. 준비/반납 동작은 추가하지 않는다."""
+# 전체 공정(HMI)의 퍼티 단계 → 워커 작업. 순서: 집기 1회 → 틈마다 (뜨기 → 도포) → 반납 1회 (hmi/process_runner.py)
+PROCESS_TASKS = {'PUTTY_PICKUP': 'pickup', 'PUTTY_SCOOP': 'scoop', 'PUTTY': 'apply', 'PUTTY_RETURN': 'return'}
+
+
+def _args(cfg, names):
+    """robot.yaml 값 → ['--joint-speed', '10.0', ...] (리스트 값은 펼침: taught_pose 등)"""
+    out = []
+    for name in names:
+        if cfg.get(name) is None:
+            raise ValueError(f'E_FORCE: robot.yaml {name} 설정이 필요합니다.')
+        value = cfg[name]
+        out += ['--' + name.replace('_', '-'),
+                *([str(v) for v in value] if isinstance(value, (list, tuple)) else [str(value)])]
+    return out
+
+
+def _optional(cfg, names):
+    """robot.yaml 에 있는 것만 (없으면 각 스크립트 기본값)"""
+    return _args(cfg, [n for n in names if cfg.get(n) is not None])
+
+
+# robot.yaml 에 있으면 넘기는 선택 값 (작업별)
+OPTIONAL = {
+    'PUTTY_PICKUP': ('pick_speed', 'clearance', 'settle'),
+    'PUTTY_RETURN': ('contact_force', 'search_speed', 'contact_confirm', 'seat_tolerance'),
+    'PUTTY_SCOOP': ('scoop_speed', 'entry_height', 'taught_pose', 'wall_contact_force', 'wall_stall_mm',
+                    'wall_stall_sec', 'scoop_pass_step', 'wall_search_margin', 'wall_search_speed',
+                    'wall_push_force', 'wall_contact_confirm', 'scrape_stiffness'),
+}
+
+
+def process_putty_goal(request, settings, virtual_mode=False, held=False, scoop_pass=None):
+    """팀 Process Goal → 퍼티 워커 goal. held: 이 서버에서 헤라 집기가 성공했고 아직 반납 전인지
+    (실물 뜨기의 파지 확인 = '집기 성공이면 잡혀 있다'로 본다, putty_full_cycle.launch.py 와 같은 규칙).
+    scoop_pass: 이번 뜨기 회차 (putty_task_server 가 집기 후 뜨기마다 셈). None 이면 robot.yaml scoop_pass."""
     from types import SimpleNamespace
-    if request.task_code == 'PUTTY_LOAD':
-        return process_load_goal(request, settings, virtual_mode)
-    if request.task_code != 'PUTTY':
+    code = request.task_code
+    if code in ('PUTTY_PICKUP', 'PUTTY_RETURN'):
+        cfg = settings['putty']['pickup' if code == 'PUTTY_PICKUP' else 'return']
+        names = ('joint_speed', 'joint_acceleration') + (('transfer_speed',) if code == 'PUTTY_PICKUP' else ())
+        goal = SimpleNamespace(task=PROCESS_TASKS[code], virtual_mode=virtual_mode, tool_held_confirmed=False,
+                               arguments=_args(cfg, names) + _optional(cfg, OPTIONAL[code]))
+        worker_command(goal)
+        return goal
+    if code == 'PUTTY_SCOOP':
+        cfg = dict(settings['force']['putty_scoop'])
+        if scoop_pass is not None:
+            cfg['scoop_pass'] = int(scoop_pass)
+        goal = SimpleNamespace(task='scoop', virtual_mode=virtual_mode, tool_held_confirmed=held,
+                               arguments=_args(cfg, ('scoop_angle', 'scoop_pass', 'wall_scrape_height',
+                                                     'transfer_speed'))
+                               + _optional(cfg, OPTIONAL['PUTTY_SCOOP'])
+                               + ['--transfer-z', str(settings['putty']['holder_transfer_z'])])
+        try:
+            worker_command(goal)
+        except ValueError as exc:
+            raise ValueError(f'E_GRIP: {exc} (먼저 /process/putty_pickup 성공 필요)' if '파지' in str(exc)
+                             else str(exc)) from exc
+        return goal
+    if code != 'PUTTY':
         raise ValueError('E_NO_GAP: PUTTY 작업만 지원합니다.')
     start, end = list(request.start_point), list(request.end_point)
     if (len(start) != 3 or len(end) != 3 or not all(map(math.isfinite, start+end)) or
@@ -133,6 +186,9 @@ def process_putty_goal(request, settings, virtual_mode=False):
                'stable_sec': 'force-stable-time', 'loss_sec': 'force-loss-timeout',
                'transfer_speed': 'transfer-speed', 'apply_speed': 'apply-speed',
                'acceleration': 'acceleration', 'transfer_z': 'transfer-z',
+               'floor_lift': 'floor-lift', 'floor_below_gap': 'floor-below-gap', 'contact_confirm': 'contact-confirm',
+               'press_method': 'press-method', 'press_stiffness': 'press-stiffness',
+               'press_tolerance': 'press-tolerance',
                'blade_angle': 'blade-angle', 'blade_end_angle': 'blade-end-angle',
                'approach_distance': 'approach-distance', 'samples': 'samples'}
     for key, option in mapping.items():
@@ -155,6 +211,9 @@ def process_error_code(message):
         return 'E_NO_GAP'
     if 'e_no_wall' in text:
         return 'E_NO_WALL'
+    for code in ('E_GRIP', 'E_FORCE'):     # 변환 단계에서 붙인 접두어 우선
+        if text.startswith(code.lower()):
+            return code
     if '특이점' in text or 'singular' in text:
         return 'E_SINGULAR'
     if '정리 확인 실패' in text or '정지 확인 실패' in text:
@@ -164,37 +223,3 @@ def process_error_code(message):
     if '파지' in text or 'grip' in text or '집기' in text:
         return 'E_GRIP'
     return 'E_TIMEOUT'
-
-
-def process_load_goal(request, settings, virtual_mode=False):
-    """명시적 판 작업 요청. Goal의 XYZ는 날 접촉 시 TCP 기준이며 벽 도포 Goal과 구분한다."""
-    from types import SimpleNamespace
-    cfg = settings['force']['putty_load']
-    start, end = list(request.start_point), list(request.end_point)
-    if (len(start) != 3 or len(end) != 3 or not all(map(math.isfinite, start+end)) or
-            any(abs(start[i]-end[i]) > 1e-6 for i in (1, 2))):
-        raise ValueError('E_NO_GAP: 판 묻히기는 BASE +X 직선 TCP 시작·끝점이 필요합니다.')
-    if not cfg.get('tool_held_confirmed', False):
-        raise ValueError('E_GRIP: 팀 요청 전 헤라 파지 수동 확인이 필요합니다.')
-    if cfg.get('ref') != 0 or cfg.get('mod') != 0 or cfg.get('direction') != [0,0,1,0,0,0]:
-        raise ValueError('E_FORCE: 판 작업은 BASE -Z 절대 힘 모드를 사용합니다.')
-    options = ['--contact-pose', *map(str, start+list(cfg['contact_abc'])),
-               '--distance', str(end[0]-start[0]), '--force-stiffness', *map(str,cfg['stiffness'])]
-    names = ('approach_height', 'search_distance', 'search_speed', 'contact_force', 'hold_force',
-             'force_limit', 'force_tolerance', 'force_wait_timeout', 'force_stable_time',
-             'force_loss_timeout', 'scrape_speed', 'lift', 'lift_speed', 'acceleration')
-    for name in names:
-        value = cfg.get(name)
-        if value is None:
-            raise ValueError(f'E_FORCE: putty_load.{name} 설정이 필요합니다.')
-        options.extend(['--'+name.replace('_','-'), str(value)])
-    if cfg.get('transfer_z') is not None or cfg.get('transfer_speed') is not None:
-        if cfg.get('transfer_z') is None or cfg.get('transfer_speed') is None:
-            raise ValueError('자동 이송 설정은 높이/속도가 모두 필요합니다.')
-        options.extend(['--transfer-z', str(cfg['transfer_z']), '--transfer-speed', str(cfg['transfer_speed'])])
-    for name in ('joint_speed', 'joint_acceleration'):
-        if cfg.get(name) is not None:
-            options.extend(['--'+name.replace('_','-'), str(cfg[name])])
-    goal = SimpleNamespace(task='load', virtual_mode=virtual_mode, tool_held_confirmed=True, arguments=options)
-    worker_command(goal)
-    return goal

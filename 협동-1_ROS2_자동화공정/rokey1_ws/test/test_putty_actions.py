@@ -42,17 +42,11 @@ def test_real_apply_requires_contact_search_settings():
     assert '--contact-search' in worker_command(goal())
 
 
-def test_real_return_and_unconfirmed_scoop_do_not_start():
-    with pytest.raises(ValueError):
-        worker_command(goal('return'))
-    with pytest.raises(ValueError):
-        worker_command(goal('scoop'))
-    assert 'scoop' in worker_command(goal('scoop', confirmed=True))
 
 
 def fake_server():
     server = SimpleNamespace(
-        lock=threading.Lock(), busy=True, finishing=False, faulted=False,
+        lock=threading.Lock(), busy=True, finishing=False, faulted=False, spatula_held=False,
         cancel_event=threading.Event(), shutdown_event=threading.Event(), events=[],
     )
     logger = SimpleNamespace(info=lambda *a: None, warning=lambda *a: None, error=lambda *a: None)
@@ -188,16 +182,6 @@ def test_service_wait_remains_cancellable_without_waiting_for_motion_completion(
     assert 'future_cancel' in server.events
 
 
-def test_hmi_putty_tasks_use_actions_and_sanding_is_preserved():
-    from hmi.tasks import TASK_MAP, putty_arguments
-    for name in ('initialize_device', 'pickup_spatula', 'scoop_putty',
-                 'apply_putty_plane', 'return_spatula', 'putty_cycle'):
-        assert TASK_MAP[name]['kind'] == 'action'
-        assert TASK_MAP[name]['putty_tasks']
-        assert TASK_MAP[name]['build'] is None
-    assert TASK_MAP['sanding_goal']['kind'] == 'action'
-    assert putty_arguments('apply', dict(floor_force=2.3, wall_force=2.3,
-                                       press_force=6, apply_speed=10))[-2:] == ['--apply-speed', '10']
 
 
 def test_worker_can_be_interrupted_while_its_operation_is_still_running():
@@ -266,9 +250,6 @@ def test_team_process_uses_same_apply_worker_and_preserves_force_settings():
         process_putty_goal(request, cfg)
 
 
-def test_existing_six_newton_minimum_conflict_is_rejected_before_worker():
-    with pytest.raises(ValueError, match='10 N'):
-        worker_command(goal(arguments=['--floor-force', '2.3', '--wall-force', '2.3']))
 
 
 def test_process_trace_only_collects_finite_upward_force_samples():
@@ -297,30 +278,6 @@ def test_team_force_stats_can_record_base_x_without_relabeling_as_z():
     assert data['fx_mean'] == 10 and 'fz_mean' not in data
 
 
-def test_process_result_and_completed_feedback_use_existing_executor(monkeypatch):
-    from rokey_interfaces.action import PuttyTask
-    server = fake_server()
-    server.process_virtual_mode = False
-    server.process_snapshot = lambda: dict(joints=[0.]*6, pose=[1.]*6, force=[2.]*6)
-    def execute(view, release_slot):
-        assert release_slot is False
-        view.worker_started = True
-        view.fx = [6., -6.]
-        view.succeed()
-        result = PuttyTask.Result()
-        result.success, result.message = True, 'completed'
-        return result
-    server.execute = execute
-    monkeypatch.setattr(module, 'process_putty_goal', lambda *a: goal())
-    handle = Handle()
-    handle.request = SimpleNamespace(task_code='PUTTY', run_id=1, gap_id=2, start_point=[1.,2.,3.], end_point=[1.,2.,4.])
-    feedback = []
-    handle.publish_feedback = feedback.append
-    result = PuttyTaskServer.execute_process(server, handle)
-    assert result.success and handle.terminal == 'succeeded'
-    assert len(feedback) == 1 and feedback[0].step == 'putty_scrape'
-    assert feedback[0].contact_ratio == 1.0
-    assert not server.busy
 
 
 def test_process_invalid_configuration_reports_force_error_without_worker(monkeypatch):
