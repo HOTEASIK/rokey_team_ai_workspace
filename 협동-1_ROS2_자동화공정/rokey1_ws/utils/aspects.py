@@ -20,8 +20,7 @@ import DR_init
 
 from utils.shutdown import safe_shutdown
 
-DEFAULT_ROBOT_ID = 'dsr01'
-DEFAULT_ROBOT_MODEL = 'm0609'
+from utils.robot import ROBOT_ID as DEFAULT_ROBOT_ID, ROBOT_MODEL as DEFAULT_ROBOT_MODEL  # config/robot.yaml
 
 
 class DsrApp:

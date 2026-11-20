@@ -1,10 +1,10 @@
 """실험 데이터로 파라미터 고르기 + 간단한 모델 (ROS 노드 아님, DB만 읽음)
 
 설치: sudo apt install python3-sklearn
-실행: python3 ~/ws_cobot_pjt/ws_dsr/src/rokey1_ws/analysis/train.py putty_scrape clay
+실행: python3 ~/ws_cobot_pjt/ws_dsr/src/rokey1/analysis/train.py putty_scrape clay
 
 대상: run.purpose = EXPERIMENT, 지정한 재료, 지정한 step, 첫 시도(attempt = 0)
-입력: params 의 target_fz, vel + 틈 길이(gap.length_mm, migrate_02)
+입력: params 의 target_fz, vel + 틈 길이(gap 시작~끝 거리로 계산)
 출력: 1) 조합별 표  2) 성공 확률(로지스틱 회귀)  3) 품질 점수 규칙(얕은 결정트리)
 """
 import os
@@ -33,7 +33,7 @@ GROUP BY fz, vel ORDER BY score DESC, ok DESC
 
 SQL_ROWS = """
 SELECT CAST(COALESCE(t.params->>'$.target_force', t.params->>'$.target_fz') AS DOUBLE), CAST(t.params->>'$.vel' AS DOUBLE),
-       g.length_mm, t.success, q.score
+       SQRT(POW(g.end_x-g.start_x,2)+POW(g.end_y-g.start_y,2)+POW(g.end_z-g.start_z,2)) length_mm, t.success, q.score
 FROM task_log t
 JOIN run r ON r.run_id = t.run_id AND r.purpose = 'EXPERIMENT' AND r.material = %s
 JOIN gap g ON g.gap_id = t.gap_id

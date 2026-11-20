@@ -15,7 +15,7 @@ def generate_launch_description():
         DeclareLaunchArgument('fake', default_value='false'),
         DeclareLaunchArgument('host', default_value='127.0.0.1'),
         Node(package='rokey1', executable='hmi_server', output='screen',
-             parameters=[{'host': LaunchConfiguration('host')}]),
+             parameters=[{'host': LaunchConfiguration('host'), 'fake': LaunchConfiguration('fake')}]),
         Node(package='rokey1', executable='fake_process', output='screen',
              condition=IfCondition(LaunchConfiguration('fake'))),
     ])

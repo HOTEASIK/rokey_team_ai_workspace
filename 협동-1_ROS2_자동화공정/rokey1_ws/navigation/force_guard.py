@@ -177,7 +177,7 @@ class Injector:
 # =============================================================================
 class ForceGuard:
     """사용법:
-        guard = ForceGuard(io)               # io: wall_size.SizeIO (RobotIO 계열)
+        guard = ForceGuard(io)               # io: wall_size.SizeIO
         guard.zero()                         # 접촉 없는 정지 상태에서 관절 토크 영점
         ...
         w = guard.check(pos, wrench, expected=(APP_DIR,), context='seek')   # 루프마다

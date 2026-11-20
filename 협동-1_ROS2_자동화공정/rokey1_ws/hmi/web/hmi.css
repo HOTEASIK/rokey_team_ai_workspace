@@ -582,7 +582,7 @@ button,.task-item,.page-tab,.task-tab,.mode-btn,.layout-btn,.console-filter,inpu
 /* ===== 로봇 자세 뷰 (관절 원 + 링크 선 + 그리퍼 TCP, 고정 등각 시점) ===== */
 .sim-content{grid-template-columns:minmax(0,1fr) 230px}
 .viz-arm{position:relative;background:#191c1e;display:flex;min-width:0}
-.viz-arm svg{width:100%;height:100%;min-height:540px;display:block}
+.viz-arm svg{width:100%;height:100%;min-height:380px;display:block}
 .viz-arm .map-corner.br{right:16px;bottom:12px;top:auto;left:auto}
 .viz-arm .g{stroke:rgba(255,255,255,.055);stroke-width:2}
 .viz-arm .g.axis{stroke:rgba(255,255,255,.14);stroke-width:2.5}
@@ -676,3 +676,74 @@ body.simple #pageControl .estop-btn{height:110px;margin:4px 20px 20px;width:calc
 body.simple #pageControl .estop-btn b{font-size:30px}
 body.simple #pageControl .estop-btn small{font-size:15px}
 body.simple #pageControl .estop-ring{width:60px;height:60px;font-size:32px}
+
+/* ===== 조작 바 (두 페이지 공통: bringup · 속도 · 시작/정지/홈 · 비상 정지) ===== */
+.command-bar{display:flex;align-items:stretch;gap:20px;padding:12px 16px;background:var(--panel);border:1px solid var(--line)}
+.cb-main{flex:1;display:flex;flex-wrap:wrap;align-items:center;gap:12px 20px;min-width:0}
+.cb-group{display:flex;align-items:center;gap:8px}
+.cb-bringup{flex:none}
+.command-bar .speed-scale{display:none}
+.cb-mode{display:flex;align-items:center;gap:10px;min-width:210px;height:48px;padding:0 14px;border:1px solid var(--line);background:var(--panel-2)}
+.cb-mode i{width:10px;height:10px;border-radius:50%;background:var(--muted);flex:none}
+.cb-mode b{display:block;font-size:15px;font-weight:700}
+.cb-mode small{display:block;font-size:12px;color:var(--muted);margin-top:2px}
+.cb-mode[data-state="ok"] i{background:var(--green)}
+.cb-mode[data-state="wait"] i{background:var(--amber)}
+.cb-mode.real{border-color:#7a3739;background:#2a1d1f}
+.cb-mode.real b{color:#f2b3b3}
+.cb-btn{height:48px;min-width:92px;padding:0 14px;border:1px solid #474c4f;background:transparent;color:var(--text);cursor:pointer;text-align:center}
+.cb-btn b{display:block;font-size:14px;font-weight:700}
+.cb-btn small{display:block;font-size:11px;color:var(--muted)}
+.cb-btn:hover{border-color:#6a7073}
+.cb-btn.active{border-color:var(--green);background:#1c2a25}
+.cb-btn.real.active{border-color:var(--red);background:#3a2022}
+.cb-btn.ghost{border-style:dashed}
+.cb-btn:disabled{opacity:.35;cursor:default}
+.command-bar .speed-block{flex:none;display:flex;align-items:center;margin:0;padding:0 12px;height:48px;border:1px solid var(--line);gap:8px}
+.command-bar .speed-block input[type=range]{width:150px}
+.command-bar .speed-value{font-size:18px;min-width:52px;text-align:right}
+.command-bar .speed-warning{font-size:12px;color:#f2b3b3;white-space:nowrap}
+.command-bar .unlock-btn,.command-bar .mini-btn{height:30px;padding:0 8px}
+.command-bar .action-btn{height:48px;flex:none;padding:0 18px;font-size:15px}
+.command-bar .action-btn small{font-size:12px;font-weight:600;margin-left:4px;opacity:.75}
+.command-bar .cb-estop{margin:0;width:auto;height:auto;min-height:52px;min-width:150px;padding:0 22px;flex:none}
+/* 간편 모드: 터치하기 쉽게 키움 */
+body.simple .command-bar{padding:16px 20px}body.simple .cb-main{gap:14px 24px}
+body.simple .cb-mode,body.simple .cb-btn,body.simple .command-bar .speed-block{height:64px}
+body.simple .cb-btn b,body.simple .cb-mode b{font-size:18px}
+body.simple .command-bar .action-btn{height:72px;font-size:22px;padding:0 26px}
+body.simple .command-bar .cb-estop{min-width:190px;padding:0 26px}
+body.simple .command-bar .estop-btn b{font-size:22px}
+
+/* ===== 로그 탭 (작업 로그 / 로봇 bringup) ===== */
+.log-channels{display:flex;gap:4px}
+.log-channel{position:relative;height:34px;padding:0 14px;border:1px solid var(--line);background:transparent;color:var(--muted);font-size:14px;font-weight:700;cursor:pointer}
+.log-channel span{font-family:var(--mono);font-size:12px;font-weight:500;margin-left:4px}
+.log-channel.active{background:var(--panel-3);border-color:var(--orange);color:var(--text)}
+.log-channel i{position:absolute;top:5px;right:5px;width:7px;height:7px;border-radius:50%;background:var(--red)}
+.log-channel i[hidden]{display:none}
+.command-bar .action-btn:disabled small{opacity:1}
+
+/* ===== TCP 카드: 경로 보기 / 좌표 보기 전환 ===== */
+.viz-arm[hidden]{display:none}
+.view-toggle{display:flex;gap:4px;padding:3px;border:1px solid var(--line);margin-left:auto;margin-right:16px}
+.view-btn{height:32px;padding:0 14px;border:0;border-bottom:2px solid transparent;background:none;color:var(--muted);font-size:13px;font-weight:700;cursor:pointer}
+.view-btn:hover{color:var(--text)}
+.view-btn.active{background:var(--panel-3);color:var(--text);border-bottom-color:var(--orange)}
+.posx-block{display:flex;flex-direction:column;gap:6px;padding:10px 0}
+.posx-block code{font-family:var(--mono);font-size:12px;color:var(--text);word-break:break-all;line-height:1.5}
+.posx-block .mini-btn{align-self:flex-start;height:28px;padding:0 10px}
+
+/* 로그 전체 보기: 로그 카드만 화면 가득 (Esc 는 비상 정지라 닫기는 같은 버튼) */
+.event-console.log-full{position:fixed;inset:12px;height:auto!important;min-height:0!important;z-index:900;display:flex;flex-direction:column;background:var(--panel,#1d2022);border:1px solid var(--line,#383d40);border-radius:10px;box-shadow:0 12px 40px rgba(0,0,0,.5)}
+.event-console.log-full .console-log{flex:1;max-height:none;min-height:0}
+#logFullBtn{border-color:var(--accent,#ff7a1a)}
+
+/* --- 예/아니요 확인 팝업 (화면 정중앙, <dialog> 기본 위치) --- */
+.ask-dlg{border:1px solid var(--orange);background:var(--panel);color:var(--text);padding:20px 22px;min-width:340px;max-width:min(480px,90vw);box-shadow:0 12px 40px rgba(0,0,0,.5)}
+.ask-dlg::backdrop{background:rgba(0,0,0,.55)}
+.ask-dlg p{margin:0 0 18px;font-size:14px;line-height:1.55;white-space:pre-line}
+.ask-btns{display:flex;gap:10px;justify-content:flex-end}
+.ask-btns button{min-width:90px;height:34px;border:1px solid var(--line);background:var(--panel-2);color:var(--text);font-size:13px;font-weight:700;cursor:pointer}
+.ask-btns button.yes{border-color:#875622;background:#3e311e;color:#ffb66d}
+.ask-btns button:hover{border-color:var(--orange)}

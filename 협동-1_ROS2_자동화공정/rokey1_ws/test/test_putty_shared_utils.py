@@ -3,12 +3,6 @@
 from types import SimpleNamespace
 
 from utils import shutdown
-from utils.service_waiter import ServiceWaiter
-from putty_demo.service_waiter import ServiceWaiter as LegacyWaiter
-
-
-def test_legacy_waiter_uses_team_class():
-    assert LegacyWaiter is ServiceWaiter
 
 
 def test_cleanup_failure_still_closes_node_and_context(monkeypatch):

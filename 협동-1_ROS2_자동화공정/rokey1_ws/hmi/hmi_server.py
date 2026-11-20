@@ -25,7 +25,8 @@
   GET  /api/state                         상태 스냅샷
   GET  /api/events                        SSE (state / log / run 이벤트)
   POST /api/start   {task_id, mode, params}
-  POST /api/stop    {run_id?}             run_id 없으면 전부 정지
+  POST /api/bringup {mode}                [sodvir]/[sodreal]: bringup 만 (액션 서버는 공정 시작 때 필요한 것만 자동)
+  POST /api/stop    {run_id?}             run_id 없으면 전부 정지 (bringup 제외)
   POST /api/stdin   {run_id, text}
   POST /api/estop   /   POST /api/estop/reset
   POST /api/speed   {pct, unlocked}       속도 % (기본 100, 안전 해제 시 최대 200)
@@ -52,11 +53,13 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import rclpy
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
+from rcl_interfaces.msg import ParameterDescriptor
 from rclpy.signals import SignalHandlerOptions
 from rclpy.callback_groups import ReentrantCallbackGroup
 from sensor_msgs.msg import JointState
 
-from hmi.tasks import MODES, TASK_MAP, apply_speed, catalog, normalize_params, parse_posx
+from hmi.tasks import (ACTION_SERVER, MODES, TASK_MAP, apply_speed, catalog, normalize_params, parse_posx,
+                       process_actions)
 
 try:
     from dsr_msgs2.msg import RobotError
@@ -96,8 +99,20 @@ BAD_STATES = {3, 5, 6, 9, 10}
 LOG_LEVEL_RE = re.compile(r'\[(DEBUG|INFO|WARN|WARNING|ERROR|FATAL)\]')
 ANSI_RE = re.compile(r'\x1b\[[0-9;]*m')
 STOP_ESCALATE = ((8.0, signal.SIGTERM), (15.0, signal.SIGKILL))
+
+
+def group_alive(pgid):
+    """프로세스 그룹에 아직 살아 있는 프로세스가 있는지."""
+    try:
+        os.killpg(pgid, 0)
+        return True
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
 SPEED_MIN, SPEED_DEFAULT, SPEED_SAFE_MAX, SPEED_UNLOCKED_MAX = 10, 100, 100, 200
 STATE_PERIOD = 0.2   # 화면으로 로봇 상태를 보내는 주기 [s] (5 Hz)
+SERVER_TIMEOUT = 60.0    # 공정 시작 때 켠 액션 서버가 준비될 때까지 기다리는 최대 시간 [s]
 
 
 def now():
@@ -112,12 +127,13 @@ class EventHub:
         self.lock = threading.Lock()
         self.subscribers = []
         self.logs = deque(maxlen=history)
+        self.bringup_logs = deque(maxlen=history)   # bringup 출력은 따로 보관 (작업 로그를 밀어내지 않게)
 
     def subscribe(self):
         q = queue.Queue(maxsize=2000)
         with self.lock:
             self.subscribers.append(q)
-            backlog = list(self.logs)
+            backlog = sorted(list(self.logs) + list(self.bringup_logs), key=lambda m: m['data']['t'])
         return q, backlog
 
     def unsubscribe(self, q):
@@ -129,7 +145,7 @@ class EventHub:
         msg = {'event': event, 'data': data}
         with self.lock:
             if event == 'log':
-                self.logs.append(msg)
+                (self.bringup_logs if data.get('channel') == 'bringup' else self.logs).append(msg)
             subs = list(self.subscribers)
         for q in subs:
             try:
@@ -137,14 +153,15 @@ class EventHub:
             except queue.Full:
                 pass
 
-    def log(self, level, source, message, state=None, run_id=None, raw=None, popup=None):
-        """popup=False : 작업자가 직접 누른 동작의 결과처럼 화면 팝업이 필요 없는 경고."""
+    def log(self, level, source, message, state=None, run_id=None, raw=None, popup=None, channel='main'):
+        """popup=False : 작업자가 직접 누른 동작의 결과처럼 화면 팝업이 필요 없는 경고.
+        channel='bringup' : 화면의 [로봇 bringup] 로그 탭으로 따로 보낸다."""
         level = {'WARNING': 'WARN', 'FATAL': 'ERROR', 'DEBUG': 'INFO'}.get(level, level)
         if state is None:
             state = {'ERROR': 'FAULT', 'WARN': 'WATCH'}.get(level, 'OK')
         self.publish('log', {'t': now(), 'type': level, 'source': source,
                              'message': message, 'state': state, 'run_id': run_id,
-                             'raw': raw if raw is not None else message,
+                             'raw': raw if raw is not None else message, 'channel': channel,
                              'popup': (level in ('WARN', 'ERROR') and state != 'INPUT') if popup is None else popup})
 
 
@@ -261,6 +278,10 @@ class TaskManager:
                 if motion and r.motion:
                     raise RuntimeError(f'로봇 동작 작업이 이미 실행 중입니다: {r.task["label"]} (실행 #{r.id}). '
                                        '먼저 정지하세요.')
+                if (task['kind'] == 'db' or task.get('mode_bound')) and r.task.get('mode_bound') and r.mode != mode:
+                    # 액션 서버는 켤 때의 모드로 동작 → 공정 모드와 다르면 DB 의 run.mode 가 실제와 어긋남
+                    raise RuntimeError(f'{r.task["label"]} 이(가) {r.mode} 모드로 실행 중입니다 (실행 #{r.id}). '
+                                       f'화면 모드({mode})와 맞추거나 서버를 정지 후 다시 시작하세요.')
             run = Run(task, mode, params, motion)
             self.runs.append(run)
             self.runs = self.runs[-40:]
@@ -283,6 +304,58 @@ class TaskManager:
         self._changed()
         return run
 
+    # ------------------------------------------------------------------ [sodvir]/[sodreal]
+    def bringup(self, mode):
+        """bringup 만 띄운다. 액션 서버는 공정 ▶ 시작 때 필요한 것만 켠다 (_ensure_servers)."""
+        if mode not in MODES:
+            raise ValueError(f'mode 는 {MODES} 중 하나')
+        if self.estop:
+            raise RuntimeError('비상 정지 상태입니다. 비상 정지 해제 후 누르세요.')
+        for r in self.active_runs():
+            if r.task.get('mode_bound') and r.mode != mode:
+                raise RuntimeError(f'{r.task["label"]} 이(가) {r.mode} 모드로 실행 중입니다. 먼저 끄고 다시 누르세요.')
+        if any(r.task['id'] == 'bringup' for r in self.active_runs()):
+            raise RuntimeError('bringup 이 이미 실행 중입니다.')
+        if self.ros.links()['controller'] and not self.ros.robot_snapshot()['stale']:
+            # 서비스만 보고 판단하면 방금 끈 bringup 이 그래프에 잠깐 남아 있어 오판 → /joint_states 도 확인
+            # 터미널에서 띄운 bringup 이 있으면 또 띄우지 않는다 (같은 이름 노드가 둘이 됨) → 화면 모드만 바꾼다
+            self.hub.log('WARN', 'HMI', f'외부(터미널) bringup 사용 중 → 모드만 {mode} 로 설정. '
+                                        'bringup 모드와 같은지 확인하세요.', popup=False)
+            return None
+        return self.start('bringup', mode, {})
+
+    def _ensure_servers(self, run):
+        """공정에 필요한 /process/* 액션이 없으면 그 서버를 run.mode 로 켜고 준비될 때까지 기다린다."""
+        actions = process_actions(run.task['process'], run.params)
+        clients = self.runner.clients
+        missing = [a for a in actions if not clients[a].server_is_ready()]
+        if not missing:
+            return True
+        if not self.ros.links()['controller'] or self.ros.robot_snapshot()['stale']:
+            self.hub.log('ERROR', 'HMI', '로봇 bringup 이 없습니다. [sodvir] / [sodreal] 을 먼저 누르세요.', run_id=run.id)
+            return False
+        run.stage = '액션 서버 켜는 중'
+        self._changed()
+        for sid in dict.fromkeys(ACTION_SERVER[a] for a in missing):
+            if any(r.task['id'] == sid for r in self.active_runs()):
+                continue                      # 이미 켜는 중
+            try:
+                self.start(sid, run.mode, {})
+            except (RuntimeError, ValueError) as e:
+                self.hub.log('ERROR', 'HMI', f'{TASK_MAP[sid]["label"]} 시작 실패: {e}', run_id=run.id)
+                return False
+        t0 = now()
+        while not all(clients[a].server_is_ready() for a in actions):
+            if run.stop_requested:
+                return False
+            if now() - t0 > SERVER_TIMEOUT:
+                names = [f'/process/{a.lower()}' for a in actions if not clients[a].server_is_ready()]
+                self.hub.log('ERROR', 'HMI', f'{SERVER_TIMEOUT:.0f}s 동안 액션 서버 준비 안 됨: {", ".join(names)} '
+                                             '(서버 로그 확인)', run_id=run.id)
+                return False
+            time.sleep(0.3)
+        return True
+
     def _start_action(self, run):
         try:
             self.ros.send_tool_task(run)
@@ -298,6 +371,9 @@ class TaskManager:
     def _run_db(self, run):
         run.state = 'running'
         self._changed()
+        if not self._ensure_servers(run):
+            self._finish(run, 'stopped' if run.stop_requested else 'failed')
+            return
         try:
             result = self.runner.run(run, lambda: self.estop)
         except Exception as e:
@@ -321,8 +397,9 @@ class TaskManager:
         level = 'INFO' if state in ('done', 'stopped') else 'ERROR' if state == 'failed' else 'WARN'
         rc = f' · 종료코드 {returncode}' if returncode is not None else ''
         state_ko = {'done': '완료', 'failed': '실패', 'stopped': '정지', 'killed': '강제 종료'}.get(state, state)
+        quiet = run.task['kind'] == 'service' and state != 'failed'   # 서버를 끈 것은 팝업 불필요
         self.hub.log(level, 'HMI', f'{run.task["label"]} {state_ko}{rc} · 실행 #{run.id}',
-                     state=state.upper()[:7], run_id=run.id)
+                     state=state.upper()[:7], run_id=run.id, popup=False if quiet else None)
         self._changed()
 
     # ------------------------------------------------------------------ 프로세스
@@ -350,7 +427,8 @@ class TaskManager:
         env = dict(os.environ, PYTHONUNBUFFERED='1', RCUTILS_COLORIZED_OUTPUT='0',
                    RCUTILS_LOGGING_BUFFERED_STREAM='0')
         source = run.task['label']
-        self.hub.log('INFO', source, '$ ' + ' '.join(argv), state='EXEC', run_id=run.id)
+        self.hub.log('INFO', source, '$ ' + ' '.join(argv), state='EXEC', run_id=run.id,
+                     channel='bringup' if run.task['id'] == 'bringup' else 'main')
         try:
             proc = subprocess.Popen(argv, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                     stderr=subprocess.STDOUT, env=env, start_new_session=True)
@@ -392,18 +470,26 @@ class TaskManager:
         text = ANSI_RE.sub('', raw.decode('utf-8', 'replace')).rstrip()
         if not text.strip():
             return
+        if 'get_robot_state_cb' in text:   # HMI 상태 조회마다 컨트롤러가 찍는 줄 (bringup 로그의 80% 를 차지해 시작 로그가 밀려남)
+            return
         m = LOG_LEVEL_RE.search(text)
         level = m.group(1) if m else 'INFO'
         if not m and ('Traceback' in text or 'Error' in text or '실패' in text or '중단' in text):
             level = 'ERROR' if 'Traceback' in text or 'Error' in text else 'WARN'
         # "[INFO] [1731712345.123] [dsr01.wall_size]: msg" → "msg"
         msg = re.sub(r'^\[[A-Z]+\]\s*\[[\d.]+\]\s*\[[^\]]*\]:\s*', '', text)
+        popup, channel = None, 'bringup' if run.task['id'] == 'bringup' else 'main'
+        if run.task['kind'] == 'service':      # 계속 떠 있는 서버/bringup 은 경고를 팝업으로 띄우지 않는다
+            if run.task['id'] == 'bringup':
+                level, popup = ('INFO' if level not in ('ERROR', 'FATAL') else level), False
+            elif level not in ('ERROR', 'FATAL'):
+                popup = False
         if prompt:
             run.awaiting_input = True
             self.hub.log('WARN', source, msg, state='INPUT', run_id=run.id, raw=text)
             self._changed()
         else:
-            self.hub.log(level, source, msg, run_id=run.id, raw=text)
+            self.hub.log(level, source, msg, run_id=run.id, raw=text, popup=popup, channel=channel)
 
     def send_stdin(self, run_id, text):
         run = self.get(run_id)
@@ -417,7 +503,9 @@ class TaskManager:
 
     # ------------------------------------------------------------------ 정지
     def stop(self, run_id=None, sig=signal.SIGINT):
-        targets = [r for r in self.active_runs() if run_id is None or r.id == run_id]
+        # run_id 없이(전체 정지) 부르면 bringup 은 남긴다 → 로봇 연결 유지
+        targets = [r for r in self.active_runs()
+                   if (r.id == run_id if run_id is not None else not r.task.get('keep_on_stop'))]
         if not targets:
             raise RuntimeError('정지할 실행 중인 작업이 없습니다.')
         for run in targets:
@@ -435,11 +523,12 @@ class TaskManager:
         return len(targets)
 
     def _signal(self, run, sig):
+        # start_new_session 이라 pgid == pid. 리더(ros2 launch/run)가 먼저 끝나도 남은 자식(ros2_control_node 등)까지 보낸다
         proc = run.proc
-        if proc is None or proc.poll() is not None:
+        if proc is None or not group_alive(proc.pid):
             return
         try:
-            os.killpg(os.getpgid(proc.pid), sig)
+            os.killpg(proc.pid, sig)
         except (ProcessLookupError, PermissionError):
             pass
 
@@ -447,10 +536,10 @@ class TaskManager:
         t0 = now()
         for after, sig in STOP_ESCALATE:
             while now() - t0 < after:
-                if proc.poll() is not None:
+                if not group_alive(proc.pid):
                     return
                 time.sleep(0.2)
-            if proc.poll() is None and run.proc is proc:
+            if group_alive(proc.pid) and run.proc is proc:
                 self.hub.log('WARN', 'HMI', f'{run.task["label"]} 이(가) 종료되지 않아 {sig.name} 전송', run_id=run.id)
                 self._signal(run, sig)
 
@@ -460,6 +549,8 @@ class TaskManager:
         self.hub.log('ERROR', 'SAFETY', '비상 정지 · move_stop(DR_QSTOP) 요청', state='STOPPED')
         self.ros.move_stop()
         for run in self.active_runs():
+            if run.task.get('keep_on_stop'):      # bringup 은 살려 둔다 (move_stop 경로 유지)
+                continue
             run.stop_requested = True
             if run.task['kind'] in ('action', 'db'):
                 self.ros.cancel_goal(run)
@@ -493,7 +584,9 @@ class HmiNode(Node):
         self.host = self.declare_parameter('host', '127.0.0.1').value
         self.port = int(self.declare_parameter('port', 8080).value)
         self.web_root = self.declare_parameter('web_root', '').value
+        self.fake = str(self.declare_parameter('fake', False, ParameterDescriptor(dynamic_typing=True)).value).lower() in ('true', '1')   # process.launch.py fake:=true (bringup 없이 시작 허용)
         poll_hz = float(self.declare_parameter('poll_hz', 5.0).value)
+        self.fake_db = str(self.declare_parameter('fake_db', '').value)   # json 경로 → MySQL 대신 가짜 DB (sodvir 테스트)
 
         rid = self.robot_id
         ctrl = f'/{rid}/dsr_controller2'
@@ -606,6 +699,7 @@ class HmiNode(Node):
             'controller': ready('state') or ready('move_stop'),
             'gripper': bool(self.gripper_cli and self.gripper_cli.service_is_ready()),
             'tool_task': bool(self.tool_task and self.tool_task.server_is_ready()),
+            'fake': self.fake,
             'dsr_msgs': HAVE_DSR, 'tool_task_msgs': HAVE_TOOL_TASK,
         }
 
@@ -818,6 +912,9 @@ def make_handler(app):
                 if path == '/api/start':
                     run = m.start(body.get('task_id'), body.get('mode', 'virtual'), body.get('params'))
                     return self._json(200, {'ok': True, 'run': run.to_json()})
+                if path == '/api/bringup':
+                    run = m.bringup(body.get('mode'))
+                    return self._json(200, {'ok': True, 'run': run.to_json() if run else None})
                 if path == '/api/stop':
                     rid = body.get('run_id')
                     n = m.stop(int(rid) if rid is not None else None)
@@ -849,7 +946,12 @@ class HmiApp:
         self.manager = TaskManager(self.hub, self.node)
         self.node.manager = self.manager
         if ProcessRunner is not None:
-            self.manager.runner = ProcessRunner(self.node, self.hub)
+            db = None
+            if self.node.fake_db:
+                from manager.fake_db import FakeDB
+                db = FakeDB(os.path.expanduser(self.node.fake_db))
+                self.hub.log('WARN', 'DB', f'가짜 DB 사용 (MySQL 안 씀) → {db.path}')
+            self.manager.runner = ProcessRunner(self.node, self.hub, db)
         self.web_root = find_web_root(self.node.web_root)
         self.running = True
 

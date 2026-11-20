@@ -95,17 +95,38 @@ class DB:
                     (datetime.now(), result, data_check, run_id))
 
     def gap_points(self, gap_id):
-        """[sx,sy,sz, ex,ey,ez] 또는 None (없는 gap_id)."""
-        row = self._exec("SELECT start_x, start_y, start_z, end_x, end_y, end_z FROM gap"
-                         " WHERE gap_id=%s", (gap_id,), fetch=True)
-        return [float(v) for v in row] if row else None
+        """([sx,sy,sz, ex,ey,ez], 벽 4점 12개) 또는 None (없는 gap_id)."""
+        row = self._exec("SELECT g.start_x, g.start_y, g.start_z, g.end_x, g.end_y, g.end_z,"
+                         " w.top_x, w.top_y, w.top_z, w.floor_x, w.floor_y, w.floor_z,"
+                         " w.right_x, w.right_y, w.right_z, w.left_x, w.left_y, w.left_z"
+                         " FROM gap g JOIN wall w ON w.wall_id=g.wall_id WHERE g.gap_id=%s", (gap_id,), fetch=True)
+        if not row:
+            return None
+        row = [float(v) for v in row]
+        return row[:6], row[6:]
 
-    def check_run(self, run_id, task):
-        """필수 데이터가 들어갔는지만 확인. 'OK' 또는 빠진 항목."""
+    def latest_wall(self):
+        """가장 최근 탐색한 벽과 그 틈: (wall_id, run_id, 벽 4점 12개, [(gap_id, [sx,sy,sz, ex,ey,ez]), ...])
+        또는 None (벽 없음). [전체 공정] 시작 단계 1~3 이 탐색 대신 쓴다."""
+        row = self._exec("SELECT wall_id, run_id, top_x, top_y, top_z, floor_x, floor_y, floor_z,"
+                         " right_x, right_y, right_z, left_x, left_y, left_z"
+                         " FROM wall ORDER BY wall_id DESC LIMIT 1", fetch=True)
+        if not row:
+            return None
+        with self.lock:
+            with self.conn.cursor() as cur:
+                cur.execute("SELECT gap_id, start_x, start_y, start_z, end_x, end_y, end_z"
+                            " FROM gap WHERE wall_id=%s ORDER BY gap_id", (row[0],))
+                gaps = [(int(g[0]), [float(v) for v in g[1:]]) for g in cur.fetchall()]
+        return int(row[0]), row[1], [float(v) for v in row[2:]], gaps
+
+    def check_run(self, run_id, task, explored=True):
+        """필수 데이터가 들어갔는지만 확인. 'OK' 또는 빠진 항목.
+        explored=False: [전체 공정] 을 탐색 뒤 단계부터 시작 → 이 run 의 wall/gap 은 없는 게 정상."""
         missing = []
         if not self._exec("SELECT 1 FROM task_log WHERE run_id=%s LIMIT 1", (run_id,), fetch=True):
             missing.append('task_log 없음')
-        if task in ('ALL', 'EXPLORE'):
+        if task in ('ALL', 'EXPLORE') and explored:
             if not self._exec("SELECT 1 FROM wall w JOIN gap g ON g.wall_id=w.wall_id"
                               " WHERE w.run_id=%s LIMIT 1", (run_id,), fetch=True):
                 missing.append('wall/gap 없음')

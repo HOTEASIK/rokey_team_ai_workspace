@@ -1,0 +1,111 @@
+{
+  "run": [
+    {
+      "run_id": 1,
+      "process": "ALL",
+      "gap_id": null,
+      "mode": "virtual",
+      "purpose": "TEST",
+      "material": "putty",
+      "note": "전체공정 가짜 테스트",
+      "result": "OK",
+      "data_check": "OK"
+    }
+  ],
+  "wall": [
+    {
+      "wall_id": 1,
+      "run_id": 1,
+      "points": [
+        600.0,
+        0.0,
+        400.0,
+        600.0,
+        0.0,
+        35.0,
+        600.0,
+        -300.0,
+        200.0,
+        600.0,
+        300.0,
+        200.0
+      ]
+    }
+  ],
+  "gap": [
+    {
+      "gap_id": 1,
+      "wall_id": 1,
+      "points": [
+        600.0,
+        0.0,
+        100.0,
+        600.0,
+        0.0,
+        300.0
+      ]
+    }
+  ],
+  "task_log": [
+    {
+      "run_id": 1,
+      "task_code": "EXPLORE",
+      "gap_id": -1,
+      "step": "explore_fake",
+      "success": true,
+      "error_code": null,
+      "fail_reason": "",
+      "params": "{\"worker\": \"explore_done\", \"gap_id\": -1}"
+    },
+    {
+      "run_id": 1,
+      "task_code": "PUTTY",
+      "gap_id": -1,
+      "step": "putty_pickup_fake",
+      "success": true,
+      "error_code": null,
+      "fail_reason": "",
+      "params": "{\"worker\": \"pickup: --joint-speed 10.0 --joint-acceleration 10.0 --transfer-speed 15.0\", \"gap_id\": -1}"
+    },
+    {
+      "run_id": 1,
+      "task_code": "PUTTY",
+      "gap_id": 1,
+      "step": "putty_scoop_fake",
+      "success": true,
+      "error_code": null,
+      "fail_reason": "",
+      "params": "{\"worker\": \"scoop: --scoop-angle 55.0 --scoop-pass 1 --wall-scrape-height 25.0 --transfer-speed 15.0 --transfer-z 230.0\", \"gap_id\": 1}"
+    },
+    {
+      "run_id": 1,
+      "task_code": "PUTTY",
+      "gap_id": 1,
+      "step": "putty_fake",
+      "success": true,
+      "error_code": null,
+      "fail_reason": "",
+      "params": "{\"worker\": \"apply: --start 600.0 0.0 100.0 --end 600.0 0.0 300.0 --contact-search --press-force 3.0 --force-mode relative --force-stiffness 200.0 3000.0 3000.0 200.0 200.0 200.0 --force-tolerance 1.0 --force-wait-timeout 30.0 --floor-force 5.0 --wall-force 5.0 --search-distance 30.0 --search-speed 2.0 --force-stable-time 0.5 --force-loss-timeout 0.5 --transfer-speed 30.0 --apply-speed 10.0 --acceleration 20.0 --transfer-z 245.14 --floor-lift 0.5 --contact-confirm 2 --press-method direct --press-stiffness 1000.0 --press-tolerance 2.0 --blade-angle 25.0 --blade-end-angle 40.0 --approach-distance 50.0 --samples 21 --edge-offset 0.0 0.0 120.0\", \"gap_id\": 1}"
+    },
+    {
+      "run_id": 1,
+      "task_code": "PUTTY",
+      "gap_id": -1,
+      "step": "putty_return_fake",
+      "success": true,
+      "error_code": null,
+      "fail_reason": "",
+      "params": "{\"worker\": \"return: --joint-speed 10.0 --joint-acceleration 10.0\", \"gap_id\": -1}"
+    },
+    {
+      "run_id": 1,
+      "task_code": "SANDING",
+      "gap_id": 1,
+      "step": "sanding_fake",
+      "success": true,
+      "error_code": null,
+      "fail_reason": "",
+      "params": "{\"worker\": \"normal=[-1.0, 0.0, 0.0] force=13.0\", \"gap_id\": 1}"
+    }
+  ]
+}

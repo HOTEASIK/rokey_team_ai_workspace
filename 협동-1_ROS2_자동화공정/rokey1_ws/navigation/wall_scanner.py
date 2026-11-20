@@ -17,11 +17,9 @@ from datetime import datetime
 # 1. 로봇 설정
 # =====================================================
 
-ROBOT_ID = "dsr01"
-ROBOT_MODEL = "m0609"
+from utils.robot import HOME_J, ROBOT_ID, ROBOT_MODEL  # config/robot.yaml robot 섹션
 
 READY_J = [0.0, 0.0, 90.0, 0.0, 0.0, 0.0]
-HOME_J = [0.0, 0.0, 90.0, 0.0, 90.0, 0.0]
 
 
 # =====================================================

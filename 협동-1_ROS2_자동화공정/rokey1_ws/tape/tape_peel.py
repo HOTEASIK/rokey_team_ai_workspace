@@ -22,8 +22,7 @@
 from utils.aspects import dsr_main
 from utils.move_stop import MoveStopClient
 
-TOOL_NAME = 'Tool Weight'
-TCP_NAME = 'GripperDA_v1'
+from utils.robot import TOOL_NAME, TCP_NAME  # config/robot.yaml robot 섹션
 
 HOME = [0.0, 0.0, 90.0, 0.0, 90.0, 0.0]
 

@@ -1,14 +1,15 @@
 # 매니저 → 공정 노드(탐색/퍼티/샌딩) 공통 작업 양식
 # ── Goal ─────────────────────────────────────────────
-string task_code        # EXPLORE / PUTTY / SANDING / PUTTY_LOAD (별도 /process/putty_load)
-int32  run_id           # command.cmd_id (한 번의 시작~종료 묶음)
+string task_code        # EXPLORE / PUTTY / SANDING
+int32  run_id           # DB run.run_id (한 번의 시작~종료 묶음)
 int32  gap_id           # 탐색은 -1
-float64[3] start_point  # BASE mm. PUTTY는 날 접촉점, PUTTY_LOAD는 판 접촉 시 TCP XYZ
+float64[3] start_point  # base 기준 [x, y, z] mm
 float64[3] end_point
+float64[12] wall       # 퍼티/샌딩: 그 틈이 있는 벽 4점 (DB wall: top, floor, right, left). 탐색은 0
 ---
 # ── Result ───────────────────────────────────────────
 bool   success
-string error_code       # "" | E_GRIP | E_FORCE | E_SINGULAR | E_TIMEOUT | E_NO_GAP
+string error_code       # "" | E_GRIP | E_FORCE | E_SINGULAR | E_TIMEOUT | E_NO_GAP | E_NO_WALL
 string message
 float64[12] wall        # 탐색만: top, floor, right, left 각 [x,y,z]
 float64[]   gaps        # 탐색만: 틈 1개당 [sx,sy,sz, ex,ey,ez]

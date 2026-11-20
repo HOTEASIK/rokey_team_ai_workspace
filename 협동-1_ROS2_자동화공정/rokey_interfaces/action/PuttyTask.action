@@ -1,27 +1,25 @@
-# 작업: initialize / pickup / scoop / load / apply / return
-string task
-# 실제 컨트롤러=false, 가상 컨트롤러=true. 연결된 시스템과 다르면 실행 거절.
-bool virtual_mode
-# 실물 scoop 작업의 사용자 파지 확인. 센서 판정이 아님.
-bool tool_held_confirmed
-# 해당 작업의 기존 CLI 설정 토큰. --execute-motion/ROS 설정은 서버가 관리.
-# apply 예: [--floor-force, '2.3', --wall-force, '2.3', --press-force, '6']
-string[] arguments
+# 퍼티 작업 (putty_task_server, /dsr01/putty_task)
+# ※ 퍼티 팀원 코드(putty_task_server.py / putty_task_client.py)의 사용 필드로 다시 만든 정의.
+#    팀원 원본 .action 이 오면 그것으로 교체할 것.
+# ── Goal ─────────────────────────────────────────────
+string   task                  # initialize / pickup / scoop / load / apply / return
+bool     virtual_mode
+bool     tool_held_confirmed   # 실물 scoop/load 전 헤라 파지를 사람이 확인했는지
+string[] arguments             # 작업별 기존 CLI 옵션
 ---
-bool success
+# ── Result ───────────────────────────────────────────
+bool   success
 string message
-int32 exit_code
-# 로봇 STANDBY 확인 여부. 취소 시 정지/힘 해제까지 성공해야 canceled 결과 반환.
-bool stop_confirmed
+int32  exit_code
+bool   stop_confirmed
 ---
-string task
-string stage
-float64 elapsed_sec
-# 중간 진행률을 정확히 계산할 수 없으면 -1. 성공 시 1.
-float32 progress
-bool pose_valid
+# ── Feedback ─────────────────────────────────────────
+string     task
+string     stage
+float64    elapsed_sec
+float64    progress            # 모르면 -1, 성공 시 1
+string     log_line
+bool       pose_valid
 float64[6] tcp_pose
-bool force_valid
+bool       force_valid
 float64[6] tool_force
-# 원본 작업 로그. 위치/힘은 BASE 기준이며 순차 조회값.
-string log_line

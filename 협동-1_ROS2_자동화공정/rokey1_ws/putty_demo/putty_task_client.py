@@ -13,7 +13,7 @@ from rokey_interfaces.action import PuttyTask
 
 from .action_protocol import worker_command
 from .action_worker import MODULES
-from .pickup_spatula import ROBOT_ID
+from utils.robot import ROBOT_ID  # config/robot.yaml robot 섹션
 
 
 def main(argv=None):

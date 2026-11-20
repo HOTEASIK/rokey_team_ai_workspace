@@ -9,49 +9,136 @@ db:
   password: cobot
   database: cobot
 
-common:
-  vel: 60
-  acc: 60
-
-poses:                 # 이름: {type: joint | task, value: [...]}
-  standby: {type: joint, value: [0, 0, 90, 0, 90, 0]}
+robot:                 # 모든 노드 공통 (utils/robot.py 로 읽음)
+  id: dsr01            # bringup 의 name 과 같아야 함
+  model: m0609
+  tool: Tool Weight    # 티칭 펜던트에 등록된 Tool 이름
+  tcp: GripperDA_v1    # 티칭 펜던트에 등록된 TCP 이름
+  home_j: [0.0, 0.0, 90.0, 0.0, 90.0, 0.0]
 
 force:                 # 대분류_소분류: 힘제어 파라미터
-  putty_scrape:        # /process/putty 벽 도포 (BASE +X 단일 축 힘, putty_demo/action_protocol.py)
-    stiffness: [3000, 3000, 3000, 200, 200, 200]
-    target:    [10, 0, 0, 0, 0, 0]   # +X 10 N 이상이어야 함 (contact_search.press_force_request)
+  putty_scrape:        # /process/putty 벽 도포 (BASE +X 단일 축 힘, putty_demo/action_protocol.py). 퍼티 11-19 값
+    stiffness: [200.0, 3000.0, 3000.0, 200.0, 200.0, 200.0]   # BASE X(누르는 방향)만 부드럽게
+    target:    [3.0, 0, 0, 0, 0, 0]   # +X 목표 힘 N (0 보다 크면 됨, 10 N 하한 제거됨)
     direction: [1, 0, 0, 0, 0, 0]
+    min_force: 5.0
+    tol: 1.0           # contact_ratio 계산: target ± tol 안이면 접촉 유지
+    wait_sec: 30.0
     ref: 0
-    mod: 0
-    tol: 2.0           # contact_ratio 계산: target ± tol 안이면 접촉 유지
-    wait_sec: 1.0
-  putty_load:          # /process/putty_load 판 묻히기 (BASE -Z 절대 힘). null = 퍼티 팀원 확정 전 → 요청 거부됨
-    tool_held_confirmed: false   # 실물: 헤라 파지를 사람이 확인한 뒤 true
-    ref: 0
-    mod: 0
-    direction: [0, 0, 1, 0, 0, 0]
-    contact_abc: [8.37, 178.03, 7.62]
-    stiffness: [3000, 3000, 3000, 200, 200, 200]
-    approach_height: null
-    search_distance: null
-    search_speed: null
-    contact_force: null
-    hold_force: null
-    force_limit: null
-    force_tolerance: null
-    force_wait_timeout: null
-    force_stable_time: null
-    force_loss_timeout: null
-    scrape_speed: null
-    lift: null
-    lift_speed: null
-    acceleration: null
+    mod: 1             # 상대 모드(샌딩과 동일). 감시는 설정 직전 Fx 기준
+    floor_force: 5.0
+    wall_force: 5.0
+    search_distance: 30.0
+    search_speed: 2.0
+    floor_below_gap: 10.0 # 바닥 탐색은 틈 좌표 Z 아래 이만큼까지만 mm. 못 닿으면 그 자리를 바닥으로 보고 들기 (지우면 예전: search_distance 까지, 못 찾으면 실패)
+    floor_lift: 0.5       # 바닥 감지 후 벽 탐색 전 +Z 들기 mm
+    contact_confirm: 2    # 접촉 판정 연속 감지 횟수
+    press_method: direct  # direct | hybrid | position | force
+    press_stiffness: 1000.0 # position 방식 X 강성 N/m
+    press_tolerance: 2.0    # 도포 중 허용 힘 오차 N (목표 힘보다 작게)
+    stable_sec: 0.5
+    loss_sec: 0.5
+    transfer_speed: 30.0
+    apply_speed: 10.0
+    acceleration: 20.0
+    transfer_z: 245.14
+    edge_offset: [0.0, 0.0, 120.0]
+    blade_angle: 25.0      # 벽 기준 각도. 20°는 J3 37.8°로 특이점 검사에 걸려 25°(J3 52°) (2026-11-19)
+    blade_end_angle: 40.0  # 위로 갈수록 각도 키워 특이점 회피
+    approach_distance: 50.0
+    samples: 21
+  putty_scoop:         # /process/putty_scoop 용기에서 퍼티 뜨기 (scoop_putty). 값 = putty_full_cycle.launch.py 기본값
+    scoop_angle: 55.0          # 헤라 각도(바닥 기준) 45~60. 45°는 어깨 특이점
+    scoop_pass: 1              # 헤라 집은 뒤 첫 뜨기 회차 1~4. 이후 뜨기마다 +1 (4 다음 1), 끝점 +X (N-1)×scoop_pass_step
+    scoop_pass_step: 10.0      # 회차 간격 mm (몸체 쪽 +X). 0 초과 20 이하
+    wall_scrape_height: 25.0   # 뜨기 후 -X 벽을 누르며 올라가는 높이 mm (0 = 바로 상승)
+    wall_contact_force: 5.0    # 벽 탐색: 시작 대비 Fx 변화가 이 이상이면 접촉 N
+    wall_stall_mm: 0.3         # 벽 탐색: wall_stall_sec 동안 이만큼도 못 나아가면 막힘 = 접촉 mm
+    wall_stall_sec: 1.0        # 막힘 판정 시간 s (0 = 힘으로만 판정). 강성 1 N/mm 라 막혀도 힘이 5 N 못 감 (run99)
+    transfer_speed: 15.0       # 직선 이송 mm/s
+    scoop_speed: 3.0           # 사선 진입·상승 속도 mm/s (진입 1회 약 146 mm → 약 49 s)
+    entry_height: 120.0        # 사선 진입 시작 높이 (끝점 위) mm. 줄이면 진입이 짧아짐
+    taught_pose: [-553.78, 82.25, 122.70, 160.95, -179.05, 160.87]   # 1회차 썰기 끝 TCP. 용기를 옮기면 다시 찍기
+    # 벽 탐색·긁어 올리기
+    wall_search_margin: 10.0   # 기록된 벽보다 이만큼 더 밀어도 안 닿으면 멈춤 mm (시간 제한 = 거리/속도×3+5 s)
+    wall_search_speed: 2.0     # 벽 탐색 속도 mm/s
+    wall_contact_confirm: 2    # 벽 접촉 판정 연속 감지 횟수
+    wall_push_force: 3.0       # 긁어 올리는 동안 -X 로 벽을 누르는 힘 N (0 초과 20 이하)
+    scrape_stiffness: [1000.0, 3000.0, 1000.0, 200.0, 200.0, 200.0]   # 탐색·긁기 컴플라이언스 강성 x,y,z N/m, rx,ry,rz Nm/rad
 
-putty_load_line:       # 판 묻히기 직선 (TCP XYZ, 날 접촉 시). end = start 에서 X+30~40 (load_putty.CONTACT_POSE 기준)
-  start: [-431.88, -1.52, 123.68]
-  end:   [-396.88, -1.52, 123.68]
+  sanding:             # /process/sanding (sanding/sanding_server.py). 실측 후 조정. ROS 파라미터 -p press_force 가 있으면 그게 우선
+    press_force: 13.0  # 벽을 누르는 힘 N (3~30). 작업마다 task_log.params 에 기록됨
+
+sanding:               # sanding/sanding_server.py (ROS 파라미터 -p 가 있으면 그게 우선)
+  tool_posx:           # 도구 잡는 TCP [x,y,z,a,b,c] BASE. 측정 전 null. 2026-11-19 도구를 로봇 뒤로 옮김
+    1: [-499.65, -365.20, 70.02, 135.28, 179.65, 133.01]
+    2: null
+    3: null
+  floor_z: 35.0        # 벽 아래 바닥 높이 (BASE z, mm)
+  tool_radius: 45.0    # (안 씀, 2026-11-20 floor_min_tcp 로 대체)
+  floor_clear: 1.0     # (안 씀, 2026-11-20 floor_min_tcp 로 대체)
+  tool_spin: 90.0      # 작업 자세로 꺾을 때 그리퍼를 툴 Z(벽 쪽) 축으로 돌리는 각 deg (-180~180, 반대 방향은 -90, 안 돌리면 0)
+  start_back: 15.0     # 틈 시작에서 몸체 쪽(수평)으로 떨어지는 거리 mm (0~100)
+  body_side: 80.0      # 하강 위치 = 틈 시작에서 몸체 쪽(수평)으로 start_back + 이 값 mm. 거기서 수직 하강 후 벽 쪽 수평 탐색 (150 은 관절 한계로 불가)
+  floor_min_tcp: 50.0  # 샌딩 TCP 는 바닥(floor_z) + 이 값 아래로 안 내려감 mm (도구 크기 때문에 바닥에 안 닿게)
+  contact_speed: 15.0  # 하강한 곳에서 벽 쪽으로 수평 접촉 탐색 속도 mm/s (위치 이동 없음: 저항 받은 자리에서 멈춤)
+  contact_force: 5.0   # 탐색 시작 대비 외력이 이 이상이면 접촉으로 보고 멈춤 N
+  contact_max: 150.0   # 이만큼 가도 저항이 없으면 중단 mm (하강 위치는 틈 시작에서 start_back + body_side 앞)
+  exit_pull: 10.0      # 샌딩 후: 벽에서 이만큼 뗀 뒤 멈추지 않고 하강했던 자리 위(이동 높이)로 비스듬히 빠짐 mm
+  exit_speed: 60.0     # 그 빠지며 상승하는 속도 mm/s (0~150)
+  exit_acc: 60.0       # 그 가속도 mm/s² (0~300, 작을수록 부드럽게 출발/정지)
+  gripper: io          # RG2 열기/닫기: io = 컨트롤러 디지털 출력 (퍼티와 같음) | onrobot = /onrobot/sendCommand (pymodbus 필요)
+
+putty:                 # 헤라 집기/반납 (/process/putty_pickup, /process/putty_return). 값 = putty_full_cycle.launch.py 기본값
+  holder_transfer_z: 230.0     # 헤라 보관대 위 이송 높이 (TCP Z mm). 집기·뜨기·반납 공용
+  pick_pose: [-508.39, 284.79, 121.85, 136.31, -179.38, 136.56]   # 헤라 집는/놓는 TCP (보관대 바닥). 보관대를 옮기면 다시 찍기
+  pickup:
+    joint_speed: 10.0          # deg/s
+    joint_acceleration: 10.0   # deg/s²
+    transfer_speed: 15.0       # mm/s
+    pick_speed: 5.0            # 집기 높이로 내려가고 들어 올리는 속도 mm/s
+    clearance: 50.0            # 헤라 바로 위에서 멈추는 높이 mm
+    settle: 1.0                # 그리퍼 닫은 뒤 대기 s
+  return:
+    joint_speed: 10.0
+    joint_acceleration: 10.0
+    contact_force: 5.0         # 보관대 바닥 접촉: 시작 대비 Fz 변화 N
+    search_speed: 2.0          # 바닥 탐색 하강 속도 mm/s
+    contact_confirm: 2         # 바닥 접촉 판정 연속 감지 횟수
+    seat_tolerance: 10.0       # 찾은 바닥이 pick_pose Z 와 이 이상 다르면 헤라를 놓지 않음 mm
+    
 
 util:
   singularity: {mode: avoid, retry: 1}
-  camera_up:   {z_threshold: 150}
 
+
+wall_tap:              # navigation/wall_tap.py 기본값 덮어쓰기 (실측 셋업 기준). ROS 파라미터(-p)가 있으면 그게 우선
+  direction: '+x'      # 벽 방향
+  tilt: 45.0           # 그리퍼 기울기 [deg]
+  start: [770.0, 0.0, 50.0]    # 시작 위치 BASE [x, y, z] (벽 앞, 바닥 위)
+  force: 10.0          # 힘 제어 지령 [N]
+  contact: 1.5       # 접촉 진입 임계값 하한 [N]
+  k_sigma: 5.0         # 진입 임계값 = max(contact, k_sigma × 노이즈 σ)
+  probe_timeout: 30.0 # 끝나는 시간
+  hyst: 0.6
+  flex_mm: 0.0
+  step_z: 30.0         # 높이 측정 간격 [mm]
+  step_y: 30.0         # 너비 측정 간격 [mm]
+  tol: 1.0             # 이분탐색 종료 구간 [mm]
+  z_limit: 350.0       # 높이 측정 상한 (BASE z)
+  lat_range: [-320.0, 320.0]   # 너비 측정 옆 한계 (BASE)
+  width_ref_j_left:  [0.0, 24.63, 127.20, -1.28, -60.84, 90.57]   # 실측 (2026-11-17)
+  width_ref_j_right: [0.0, 27.46, 127.68, 176.69, 64.48, 91.43]
+  width_roll: 90
+  width_roll_left: 90.0
+  probe_len: 133.5     # 등록 TCP(손끝)에서 탐침 끝까지 [mm] (wall_tap 단독 실행용, pick_tap 은 PROBE_LEN)
+  #  width_z: 120.0       # >0 이면 높이 측정 건너뛰고 이 BASE z 에서 좌우만 탐색
+
+explore:               # /process/explore (navigation/explore_server.py)
+  timeout_sec: 1800    # wall_tap 1회 최대 시간 (flex_mm 0 이면 접촉 판정이 느려 900s 로는 부족, run87)
+  gaps:             # 틈 좌표 [[sx,sy,sz, ex,ey,ez], ...] (BASE mm). 틈 자동 감지 전까지 손으로 넣음
+      - [800.0, 0.0, 30.0, 800.0, 0.0, 150.0]        # 틈 1
+      - [800.0, 120.0, 40.0, 800.0, 120.0, 160.0]    # 틈 2
+
+inner_explore:         # [전체 공정] 1단계 내부 탐색 (hmi/process_runner.py). 아직 기능 없음 → 구성만
+  enabled: false       # false = 건너뜀 (기존 틈 그대로). true = /process/inner_explore 액션 호출 (서버 필요)
