@@ -50,12 +50,10 @@ import DR_init
 from utils.shutdown import run_cleanups, safe_shutdown
 
 try:
-    from navigation.wall_navigation import RobotIO
-    from navigation.wall_modeling import robust_fit_plane
+    from navigation.wall_scan_io import RobotIO, robust_fit_plane
 except ImportError:
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-    from wall_navigation import RobotIO
-    from wall_modeling import robust_fit_plane
+    from wall_scan_io import RobotIO, robust_fit_plane
 
 # =============================================================================
 # 로봇 / 공구
@@ -678,7 +676,7 @@ class VirtualWallScan:
 
 
 class ScanIO(RobotIO):
-    """wall_navigation.RobotIO 재사용 + 탐침 자세/Tool·TCP/순응제어만 바꿈."""
+    """wall_scan_io.RobotIO 재사용 + 탐침 자세/Tool·TCP/순응제어/가상 벽만 바꿈."""
 
     def __init__(self, node, dsr, mode, tool_name, tcp_name, corners, probe_length=0.0, tool_roll=0.0):
         super().__init__(node, dsr, mode)
