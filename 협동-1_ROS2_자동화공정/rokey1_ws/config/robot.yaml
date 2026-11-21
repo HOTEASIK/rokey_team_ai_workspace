@@ -133,7 +133,9 @@ wall_tap:              # navigation/wall_tap.py 기본값 덮어쓰기 (실측 �
   width_roll_left: 90.0
   probe_len: 133.5     # 등록 TCP(손끝)에서 탐침 끝까지 [mm] (wall_tap 단독 실행용, pick_tap 은 PROBE_LEN)
   #  width_z: 120.0       # >0 이면 높이 측정 건너뛰고 이 BASE z 에서 좌우만 탐색
-
+  standoff: 10.0   # 찍기 전 벽 앞 대기 거리 (기본 15) 
+  
+  
 explore:               # /process/explore (navigation/explore_server.py)
   timeout_sec: 1800    # wall_tap 1회 최대 시간 (flex_mm 0 이면 접촉 판정이 느려 900s 로는 부족, run87)
   gaps:             # 틈 좌표 [[sx,sy,sz, ex,ey,ez], ...] (BASE mm). 틈 자동 감지 전까지 손으로 넣음
