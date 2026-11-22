@@ -1,0 +1,53 @@
+<?xml version="1.0"?>
+<robot name="simple_wall">
+
+  <!-- 기준이 되는 월드 링크 -->
+  <link name="world"/>
+
+  <!-- 벽 본체 링크 -->
+  <link name="wall_link">
+    <!-- 1. 시각적 요소 (RViz 및 시뮬레이터 화면 표시용) -->
+    <visual>
+      <!-- 벽의 중심점이 높이의 절반(1.0m)에 오도록 올려 바닥 위에 배치 -->
+      <origin xyz="0 0 1.0" rpy="0 0 0"/>
+      <geometry>
+        <box size="5.0 0.2 2.0"/>
+      </geometry>
+      <material name="gray">
+        <color rgba="0.7 0.7 0.7 1.0"/>
+      </material>
+    </visual>
+
+    <!-- 2. 충돌 요소 (물리 엔진 충돌 감지용) -->
+    <collision>
+      <origin xyz="0 0 1.0" rpy="0 0 0"/>
+      <geometry>
+        <box size="5.0 0.2 2.0"/>
+      </geometry>
+    </collision>
+
+    <!-- 3. 관성 요소 (Gazebo 등 물리 시뮬레이터 필수 항목) -->
+    <inertial>
+      <origin xyz="0 0 1.0" rpy="0 0 0"/>
+      <mass value="100.0"/>
+      <inertia ixx="33.67" ixy="0.0" ixz="0.0"
+               iyy="241.67" iyz="0.0"
+               izz="208.67"/>
+    </inertial>
+  </link>
+
+  <!-- 월드에 벽을 단단히 고정하는 조인트 -->
+  <joint name="wall_fixed_joint" type="fixed">
+    <parent link="world"/>
+    <child link="wall_link"/>
+    <!-- 벽을 배치할 월드 좌표 (x, y, z) 및 회전각 (roll, pitch, yaw) -->
+    <origin xyz="2.0 0.0 0.0" rpy="0 0 0"/>
+  </joint>
+
+  <!-- Gazebo 색상 및 고정 설정 -->
+  <gazebo reference="wall_link">
+    <material>Gazebo/Grey</material>
+    <static>true</static>
+  </gazebo>
+
+</robot>

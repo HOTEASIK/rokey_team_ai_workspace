@@ -1,0 +1,97 @@
+<?xml version="1.0"?>
+<robot name="wall_step_and_groove">
+
+  <link name="world"/>
+
+  <link name="wall_link">
+    <!-- ==================== 1. 상단 왼쪽 벽 (기준 위치 y=0.0) ==================== -->
+    <visual>
+      <origin xyz="-1.25125 0.0 1.5" rpy="0 0 0"/>
+      <geometry>
+        <box size="2.4975 0.2 1.0"/>
+      </geometry>
+      <material name="gray">
+        <color rgba="0.7 0.7 0.7 1.0"/>
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="-1.25125 0.0 1.5" rpy="0 0 0"/>
+      <geometry>
+        <box size="2.4975 0.2 1.0"/>
+      </geometry>
+    </collision>
+
+    <!-- ==================== 2. 상단 오른쪽 벽 (기준 위치 y=0.0) ==================== -->
+    <visual>
+      <origin xyz="1.25125 0.0 1.5" rpy="0 0 0"/>
+      <geometry>
+        <box size="2.4975 0.2 1.0"/>
+      </geometry>
+      <material name="gray">
+        <color rgba="0.7 0.7 0.7 1.0"/>
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="1.25125 0.0 1.5" rpy="0 0 0"/>
+      <geometry>
+        <box size="2.4975 0.2 1.0"/>
+      </geometry>
+    </collision>
+
+    <!-- ==================== 3. 하단 왼쪽 벽 (단차 적용 y=0.05) ==================== -->
+    <visual>
+      <origin xyz="-1.25125 0.05 0.5" rpy="0 0 0"/>
+      <geometry>
+        <box size="2.4975 0.2 1.0"/>
+      </geometry>
+      <material name="dark_gray">
+        <color rgba="0.55 0.55 0.55 1.0"/>
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="-1.25125 0.05 0.5" rpy="0 0 0"/>
+      <geometry>
+        <box size="2.4975 0.2 1.0"/>
+      </geometry>
+    </collision>
+
+    <!-- ==================== 4. 하단 오른쪽 벽 (단차 적용 y=0.05) ==================== -->
+    <visual>
+      <origin xyz="1.25125 0.05 0.5" rpy="0 0 0"/>
+      <geometry>
+        <box size="2.4975 0.2 1.0"/>
+      </geometry>
+      <material name="dark_gray">
+        <color rgba="0.55 0.55 0.55 1.0"/>
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="1.25125 0.05 0.5" rpy="0 0 0"/>
+      <geometry>
+        <box size="2.4975 0.2 1.0"/>
+      </geometry>
+    </collision>
+
+    <!-- 관성 요소 -->
+    <inertial>
+      <origin xyz="0 0.025 1.0" rpy="0 0 0"/>
+      <mass value="100.0"/>
+      <inertia ixx="33.67" ixy="0.0" ixz="0.0"
+               iyy="241.67" iyz="0.0"
+               izz="208.67"/>
+    </inertial>
+  </link>
+
+  <!-- 월드에 벽 고정 -->
+  <joint name="wall_fixed_joint" type="fixed">
+    <parent link="world"/>
+    <child link="wall_link"/>
+    <origin xyz="2.0 0.0 0.0" rpy="0 0 0"/>
+  </joint>
+
+  <!-- Gazebo 시뮬레이션 설정 -->
+  <gazebo reference="wall_link">
+    <static>true</static>
+  </gazebo>
+
+</robot>

@@ -1,0 +1,67 @@
+<?xml version="1.0"?>
+<robot name="wall_with_groove">
+
+  <link name="world"/>
+
+  <link name="wall_link">
+    <!-- ==================== 왼쪽 벽 (가로 2.4975m) ==================== -->
+    <visual>
+      <origin xyz="-1.25125 0 1.0" rpy="0 0 0"/>
+      <geometry>
+        <box size="2.4975 0.2 2.0"/>
+      </geometry>
+      <material name="gray">
+        <color rgba="0.7 0.7 0.7 1.0"/>
+      </material>
+    </visual>
+
+    <collision>
+      <origin xyz="-1.25125 0 1.0" rpy="0 0 0"/>
+      <geometry>
+        <box size="2.4975 0.2 2.0"/>
+      </geometry>
+    </collision>
+
+    <!-- ==================== 오른쪽 벽 (가로 2.4975m) ==================== -->
+    <!-- 왼쪽 벽과 오른쪽 벽 사이에 0.005m(0.5cm)의 세로 홈(간격)이 생김 -->
+    <visual>
+      <origin xyz="1.25125 0 1.0" rpy="0 0 0"/>
+      <geometry>
+        <box size="2.4975 0.2 2.0"/>
+      </geometry>
+      <material name="gray">
+        <color rgba="0.7 0.7 0.7 1.0"/>
+      </material>
+    </visual>
+
+    <collision>
+      <origin xyz="1.25125 0 1.0" rpy="0 0 0"/>
+      <geometry>
+        <box size="2.4975 0.2 2.0"/>
+      </geometry>
+    </collision>
+
+    <!-- 관성 요소 -->
+    <inertial>
+      <origin xyz="0 0 1.0" rpy="0 0 0"/>
+      <mass value="100.0"/>
+      <inertia ixx="33.67" ixy="0.0" ixz="0.0"
+               iyy="241.67" iyz="0.0"
+               izz="208.67"/>
+    </inertial>
+  </link>
+
+  <!-- 월드에 벽 고정 -->
+  <joint name="wall_fixed_joint" type="fixed">
+    <parent link="world"/>
+    <child link="wall_link"/>
+    <origin xyz="2.0 0.0 0.0" rpy="0 0 0"/>
+  </joint>
+
+  <!-- Gazebo 시뮬레이션 설정 -->
+  <gazebo reference="wall_link">
+    <material>Gazebo/Grey</material>
+    <static>true</static>
+  </gazebo>
+
+</robot>

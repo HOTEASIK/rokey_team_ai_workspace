@@ -1,0 +1,75 @@
+<?xml version="1.0"?>
+<!--
+  양생 테이프 롤 + 휴지걸이형 축 모델.
+  모든 치수는 launch 인자로 덮어쓸 수 있다 (단위: m, rad). 기본값은 측정 전 임시값.
+
+  프레임:
+    base_link     : 로봇 BASE (로봇 모델과 같은 이름 → TF 트리가 합쳐짐)
+    tape_holder   : 축 중심. 축(롤 회전축) = 로컬 Y, 위쪽 = 로컬 Z
+    tape_flap     : 들뜬 끝단의 뿌리. 롤 꼭대기(+Z)에서 Y축 기준 flap_angle 만큼 회전한 위치
+-->
+<robot name="tape_roll" xmlns:xacro="http://www.ros.org/wiki/xacro">
+  <!-- TODO: 실측 후 수정 -->
+  <xacro:arg name="x" default="0.5"/>
+  <xacro:arg name="y" default="0.0"/>
+  <xacro:arg name="z" default="0.2"/>
+  <xacro:arg name="yaw" default="0.0"/>            <!-- 0 = 축이 BASE Y 와 평행 (실측) -->
+  <xacro:arg name="outer_d" default="0.040"/>      <!-- 롤 바깥지름 40mm (실측) -->
+  <xacro:arg name="core_d" default="0.035"/>       <!-- 심지 지름 35mm (실측) -->
+  <xacro:arg name="width" default="0.050"/>        <!-- 테이프 폭 50mm -->
+  <xacro:arg name="shaft_d" default="0.010"/>       <!-- 축 지름 10mm (실측) -->
+  <xacro:arg name="shaft_len" default="0.080"/>
+  <xacro:arg name="flap_angle" default="0.0"/>     <!-- 끝단 위치 (꼭대기 기준) -->
+  <xacro:arg name="flap_len" default="0.015"/>     <!-- 들뜬 길이 1~2cm -->
+  <xacro:arg name="flap_lift" default="0.3"/>      <!-- 표면에서 들린 각도 -->
+
+  <xacro:property name="R" value="${$(arg outer_d) / 2}"/>
+  <xacro:property name="AXIS_Y" value="${pi / 2} 0 0"/>  <!-- cylinder Z축 → Y축 -->
+
+  <link name="base_link"/>
+
+  <link name="tape_holder">
+    <visual>  <!-- 축 -->
+      <origin rpy="${AXIS_Y}"/>
+      <geometry><cylinder radius="${$(arg shaft_d) / 2}" length="$(arg shaft_len)"/></geometry>
+      <material name="gray"><color rgba="0.5 0.5 0.5 1"/></material>
+    </visual>
+    <visual>  <!-- 테이프 롤 (바깥면) -->
+      <origin rpy="${AXIS_Y}"/>
+      <geometry><cylinder radius="${R}" length="$(arg width)"/></geometry>
+      <material name="tape"><color rgba="0.2 0.6 0.3 0.6"/></material>
+    </visual>
+    <visual>  <!-- 심지 (보이도록 살짝 길게) -->
+      <origin rpy="${AXIS_Y}"/>
+      <geometry><cylinder radius="${$(arg core_d) / 2}" length="${$(arg width) + 0.002}"/></geometry>
+      <material name="core"><color rgba="0.8 0.7 0.5 1"/></material>
+    </visual>
+  </link>
+
+  <joint name="holder_joint" type="fixed">
+    <parent link="base_link"/>
+    <child link="tape_holder"/>
+    <origin xyz="$(arg x) $(arg y) $(arg z)" rpy="0 0 $(arg yaw)"/>
+  </joint>
+
+  <link name="tape_flap">
+    <visual>
+      <origin xyz="${$(arg flap_len) / 2} 0 0"/>
+      <geometry><box size="$(arg flap_len) $(arg width) 0.001"/></geometry>
+      <material name="flap"><color rgba="0.9 0.2 0.2 1"/></material>
+    </visual>
+  </link>
+
+  <!-- 축 중심에서 flap_angle 만큼 돌린 뒤 표면(R)으로 나가서, 접선(+X)에서 flap_lift 만큼 들어올림 -->
+  <link name="tape_flap_base"/>
+  <joint name="flap_angle_joint" type="fixed">
+    <parent link="tape_holder"/>
+    <child link="tape_flap_base"/>
+    <origin rpy="0 $(arg flap_angle) 0"/>
+  </joint>
+  <joint name="flap_joint" type="fixed">
+    <parent link="tape_flap_base"/>
+    <child link="tape_flap"/>
+    <origin xyz="0 0 ${R}" rpy="0 ${-$(arg flap_lift)} 0"/>
+  </joint>
+</robot>

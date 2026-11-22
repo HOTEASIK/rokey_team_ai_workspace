@@ -1,0 +1,158 @@
+<?xml version="1.0"?>
+<!-- 이 파일은 wall_f_gen.py 로 자동 생성됩니다. 직접 수정하지 말고 파라미터를 바꿔 다시 생성하세요. -->
+<robot name="wall_f">
+
+  <material name="gray"><color rgba="0.7 0.7 0.7 1.0"/></material>
+  <material name="dark_gray"><color rgba="0.55 0.55 0.55 1.0"/></material>
+
+  <link name="world"/>
+
+  <!-- 벽 전체 기준 링크 -->
+  <link name="wall_base"/>
+  <joint name="wall_fixed_joint" type="fixed">
+    <parent link="world"/>
+    <child link="wall_base"/>
+    <origin xyz="2 0 0" rpy="0 0 0"/>
+  </joint>
+
+  <!-- ==================== 상단 왼쪽 패널 (ul) ==================== -->
+  <!-- 크기 2.4975 0.2 1 / 모따기: front_top=0.03, front_bottom=0.03, front_left=0.03, front_right=0.03, back_top=0.03, back_bottom=0.03, back_left=0.03, back_right=0.03 -->
+  <link name="ul_slider"/>
+  <joint name="ul_x_joint" type="prismatic">  <!-- 좌우 이동 -->
+    <parent link="wall_base"/>
+    <child link="ul_slider"/>
+    <origin xyz="-1.25125 0 1.5" rpy="0 0 0"/>
+    <axis xyz="1 0 0"/>
+    <limit lower="-1" upper="1" effort="100" velocity="0.5"/>
+  </joint>
+  <link name="ul_link">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry><mesh filename="file:///home/rokey/rokey_team_ai_workspace/협동-1_ROS2_자동화공정/model/meshes/launch/wall_f_ul.stl"/></geometry>
+      <material name="gray"/>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry><mesh filename="file:///home/rokey/rokey_team_ai_workspace/협동-1_ROS2_자동화공정/model/meshes/launch/wall_f_ul.stl"/></geometry>
+    </collision>
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <mass value="25"/>
+      <inertia ixx="2.16667" ixy="0" ixz="0" iyy="15.0781" iyz="0" izz="13.0781"/>
+    </inertial>
+  </link>
+  <joint name="ul_z_joint" type="prismatic">  <!-- 상하 이동 -->
+    <parent link="ul_slider"/>
+    <child link="ul_link"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <axis xyz="0 0 1"/>
+    <limit lower="-1" upper="1" effort="100" velocity="0.5"/>
+  </joint>
+  <gazebo reference="ul_link"><static>true</static></gazebo>
+
+  <!-- ==================== 상단 오른쪽 패널 (ur) ==================== -->
+  <!-- 크기 2.4975 0.2 1 / 모따기: front_top=0.03, front_bottom=0.03, front_left=0.03, front_right=0.03, back_top=0.03, back_bottom=0.03, back_left=0.03, back_right=0.03 -->
+  <link name="ur_slider"/>
+  <joint name="ur_x_joint" type="prismatic">  <!-- 좌우 이동 -->
+    <parent link="wall_base"/>
+    <child link="ur_slider"/>
+    <origin xyz="1.25125 0 1.5" rpy="0 0 0"/>
+    <axis xyz="1 0 0"/>
+    <limit lower="-1" upper="1" effort="100" velocity="0.5"/>
+  </joint>
+  <link name="ur_link">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry><mesh filename="file:///home/rokey/rokey_team_ai_workspace/협동-1_ROS2_자동화공정/model/meshes/launch/wall_f_ur.stl"/></geometry>
+      <material name="gray"/>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry><mesh filename="file:///home/rokey/rokey_team_ai_workspace/협동-1_ROS2_자동화공정/model/meshes/launch/wall_f_ur.stl"/></geometry>
+    </collision>
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <mass value="25"/>
+      <inertia ixx="2.16667" ixy="0" ixz="0" iyy="15.0781" iyz="0" izz="13.0781"/>
+    </inertial>
+  </link>
+  <joint name="ur_z_joint" type="prismatic">  <!-- 상하 이동 -->
+    <parent link="ur_slider"/>
+    <child link="ur_link"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <axis xyz="0 0 1"/>
+    <limit lower="-1" upper="1" effort="100" velocity="0.5"/>
+  </joint>
+  <gazebo reference="ur_link"><static>true</static></gazebo>
+
+  <!-- ==================== 하단 왼쪽 패널 (ll) ==================== -->
+  <!-- 크기 2.4975 0.2 1 / 모따기: front_top=0.03, front_bottom=0.03, front_left=0.03, front_right=0.03, back_top=0.03, back_bottom=0.03, back_left=0.03, back_right=0.03 -->
+  <link name="ll_slider"/>
+  <joint name="ll_x_joint" type="prismatic">  <!-- 좌우 이동 -->
+    <parent link="wall_base"/>
+    <child link="ll_slider"/>
+    <origin xyz="-1.25125 0.05 0.5" rpy="0 0 0"/>
+    <axis xyz="1 0 0"/>
+    <limit lower="-1" upper="1" effort="100" velocity="0.5"/>
+  </joint>
+  <link name="ll_link">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry><mesh filename="file:///home/rokey/rokey_team_ai_workspace/협동-1_ROS2_자동화공정/model/meshes/launch/wall_f_ll.stl"/></geometry>
+      <material name="dark_gray"/>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry><mesh filename="file:///home/rokey/rokey_team_ai_workspace/협동-1_ROS2_자동화공정/model/meshes/launch/wall_f_ll.stl"/></geometry>
+    </collision>
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <mass value="25"/>
+      <inertia ixx="2.16667" ixy="0" ixz="0" iyy="15.0781" iyz="0" izz="13.0781"/>
+    </inertial>
+  </link>
+  <joint name="ll_z_joint" type="prismatic">  <!-- 상하 이동 -->
+    <parent link="ll_slider"/>
+    <child link="ll_link"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <axis xyz="0 0 1"/>
+    <limit lower="-1" upper="1" effort="100" velocity="0.5"/>
+  </joint>
+  <gazebo reference="ll_link"><static>true</static></gazebo>
+
+  <!-- ==================== 하단 오른쪽 패널 (lr) ==================== -->
+  <!-- 크기 2.4975 0.2 1 / 모따기: front_top=0.03, front_bottom=0.03, front_left=0.03, front_right=0.03, back_top=0.03, back_bottom=0.03, back_left=0.03, back_right=0.03 -->
+  <link name="lr_slider"/>
+  <joint name="lr_x_joint" type="prismatic">  <!-- 좌우 이동 -->
+    <parent link="wall_base"/>
+    <child link="lr_slider"/>
+    <origin xyz="1.25125 0.05 0.5" rpy="0 0 0"/>
+    <axis xyz="1 0 0"/>
+    <limit lower="-1" upper="1" effort="100" velocity="0.5"/>
+  </joint>
+  <link name="lr_link">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry><mesh filename="file:///home/rokey/rokey_team_ai_workspace/협동-1_ROS2_자동화공정/model/meshes/launch/wall_f_lr.stl"/></geometry>
+      <material name="dark_gray"/>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry><mesh filename="file:///home/rokey/rokey_team_ai_workspace/협동-1_ROS2_자동화공정/model/meshes/launch/wall_f_lr.stl"/></geometry>
+    </collision>
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <mass value="25"/>
+      <inertia ixx="2.16667" ixy="0" ixz="0" iyy="15.0781" iyz="0" izz="13.0781"/>
+    </inertial>
+  </link>
+  <joint name="lr_z_joint" type="prismatic">  <!-- 상하 이동 -->
+    <parent link="lr_slider"/>
+    <child link="lr_link"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <axis xyz="0 0 1"/>
+    <limit lower="-1" upper="1" effort="100" velocity="0.5"/>
+  </joint>
+  <gazebo reference="lr_link"><static>true</static></gazebo>
+
+</robot>

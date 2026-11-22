@@ -83,3 +83,28 @@ git pull origin develop   # 충돌 나면 해결 후 커밋
 
 ## 기능 수정 시 
 기능_내용_문서 바로 아래에 이어서 작성
+## 다른 저장소 코드를 가져올 때 (중요)
+
+clone한 폴더 안에 `.git` 이 남아 있으면, 팀 저장소에는 파일 대신 **커밋 번호 하나(서브모듈 링크)** 만 올라가서 GitHub에서 그 폴더를 누르면 404가 납니다.
+
+**처음 clone 후 한 번만** 훅을 켜 두세요. 이런 커밋을 자동으로 막아 줍니다.
+
+```bash
+bash tools/setup_hooks.sh
+```
+
+외부 코드는 아래 스크립트로 가져오면 `.git` 을 `~/git_backups/` 로 자동으로 옮겨 줍니다.
+
+```bash
+bash tools/clone_external.sh <저장소 URL> <넣을 폴더 경로> [브랜치]
+```
+
+이미 clone해 둔 폴더라면 직접 옮기면 됩니다.
+
+```bash
+git rm --cached -f <폴더>         # 이미 링크로 add 됐을 때만 (파일은 안 지워짐)
+mkdir -p ~/git_backups && mv <폴더>/.git ~/git_backups/<이름>_git
+git add <폴더>
+```
+
+훅을 안 켠 팀원이 올려도 PR에서 `no-nested-git` 검사가 실패해서 알 수 있습니다.
