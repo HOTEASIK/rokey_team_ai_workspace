@@ -1,0 +1,207 @@
+<!doctype html>
+<html lang="ko">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>rokey1 실행 순서</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+/* 레이아웃: 한 줄 세로 흐름, 단계는 번호 레일 + 체크 박스 (현장에서 위→아래로 따라 하기) */
+:root{
+  --bg:#f5f7f8; --surface:#ffffff; --fg:#17212b; --muted:#5b6773; --line:#d9e0e5;
+  --accent:#e0661a; --accent-soft:#fdeee3; --steel:#2d6a8f; --steel-soft:#e4eff6;
+  --warn:#9a6500; --warn-soft:#fdf3dc; --bad:#b3261e; --bad-soft:#fbe7e5; --ok:#1d7a4c; --ok-soft:#e1f3e9;
+  --sans:"Noto Sans KR",system-ui,-apple-system,"Apple SD Gothic Neo","Malgun Gothic",sans-serif;
+  --mono:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#11161b; --surface:#182028; --fg:#e4e9ee; --muted:#93a1ad; --line:#2a3540;
+  --accent:#ff8a3d; --accent-soft:#3a2416; --steel:#7fb6d8; --steel-soft:#16293a;
+  --warn:#e8bf5a; --warn-soft:#352a12; --bad:#ff8a80; --bad-soft:#3b1d1b; --ok:#5fd19a; --ok-soft:#173226; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#11161b; --surface:#182028; --fg:#e4e9ee; --muted:#93a1ad; --line:#2a3540;
+  --accent:#ff8a3d; --accent-soft:#3a2416; --steel:#7fb6d8; --steel-soft:#16293a;
+  --warn:#e8bf5a; --warn-soft:#352a12; --bad:#ff8a80; --bad-soft:#3b1d1b; --ok:#5fd19a; --ok-soft:#173226; color-scheme:dark}
+body{background:var(--bg);color:var(--fg);font-family:var(--sans);font-size:15px;line-height:1.65;
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:28px 64px}
+.page{max-width:820px;margin:0 auto;display:flex;flex-direction:column;gap:36px}
+header h1{font-size:28px;line-height:1.25;margin:6px 0 8px;text-wrap:balance}
+.eyebrow{font-family:var(--mono);font-size:12px;letter-spacing:.08em;color:var(--accent)}
+.lede{color:var(--muted);margin:0;max-width:66ch}
+h2{font-size:20px;margin:0 0 12px;text-wrap:balance;display:flex;gap:10px;align-items:baseline}
+h2 .tag{font-family:var(--mono);font-size:12px;color:var(--accent);letter-spacing:.06em}
+h3{font-size:15.5px;margin:0 0 6px}
+p{margin:0 0 8px;max-width:68ch}
+code{font-family:var(--mono);font-size:.86em;background:var(--steel-soft);color:var(--steel);padding:1px 5px;border-radius:4px;word-break:break-word}
+pre{background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:12px 14px;overflow-x:auto;
+  font-family:var(--mono);font-size:13px;line-height:1.6;margin:8px 0 0}
+pre .c{color:var(--muted)}
+.callout{border:1px solid var(--line);border-left:4px solid var(--warn);background:var(--warn-soft);border-radius:6px;padding:10px 14px;font-size:14px}
+.callout.bad{border-left-color:var(--bad);background:var(--bad-soft)}
+.callout b{display:block;margin-bottom:2px}
+/* 단계 */
+ol.steps{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:0;counter-reset:s}
+ol.steps>li{counter-increment:s;display:grid;grid-template-columns:36px minmax(0,1fr);gap:0 14px;position:relative;padding-bottom:20px}
+ol.steps>li::before{content:counter(s);grid-row:1 / span 3;width:30px;height:30px;border-radius:50%;
+  display:grid;place-items:center;font-family:var(--mono);font-weight:600;font-size:13px;
+  background:var(--surface);border:2px solid var(--accent);color:var(--accent);position:relative;z-index:1}
+ol.steps>li::after{content:"";position:absolute;left:15px;top:30px;bottom:0;width:2px;background:var(--line)}
+ol.steps>li:last-child::after{display:none}
+ol.steps>li>*{grid-column:2;min-width:0}
+.check{display:flex;gap:8px;align-items:flex-start;font-size:14px;color:var(--muted);margin-top:6px}
+.check input{margin-top:4px;accent-color:var(--accent)}
+.check input:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+/* 표 */
+.tbl{overflow-x:auto;border:1px solid var(--line);border-radius:8px;background:var(--surface);margin-top:8px}
+table{border-collapse:collapse;width:100%;min-width:540px;font-size:14px}
+th,td{text-align:left;padding:8px 12px;border-bottom:1px solid var(--line);vertical-align:top}
+th{font-size:12px;color:var(--muted);font-weight:500;background:var(--bg)}
+tr:last-child td{border-bottom:0}
+.pill{display:inline-block;font-size:11px;font-weight:700;padding:1px 8px;border-radius:999px;white-space:nowrap}
+.p-req{background:var(--accent-soft);color:var(--accent)}
+.p-opt{background:var(--steel-soft);color:var(--steel)}
+.p-bad{background:var(--bad-soft);color:var(--bad)}
+.ui{font-weight:700;color:var(--fg);background:var(--surface);border:1px solid var(--line);border-radius:4px;padding:0 6px;white-space:nowrap}
+footer{font-size:13px;color:var(--muted);border-top:1px solid var(--line);padding-top:14px}
+@media (prefers-reduced-motion:reduce){*{scroll-behavior:auto!important}}
+</style>
+
+<div class="page">
+<header>
+  <div class="eyebrow">rokey1 · 팀 공유용 · 2026-11-18</div>
+  <h1>rokey1 실행 순서</h1>
+  <p class="lede">터미널 준비 → 웹 HMI에서 액션 서버 켜기 → 탐색 → 틈 하나씩 퍼티·샌딩 → 전체 공정. 체크 박스는 이 브라우저에만 저장됩니다.</p>
+</header>
+
+<div class="callout bad"><b>실제 로봇을 움직이기 전에</b>bringup의 mode, 웹의 모드 버튼, 액션 서버를 켤 때의 모드가 모두 같아야 합니다. 처음 실행은 속도 30~50%, 하드웨어 비상정지 버튼을 손 닿는 곳에 두세요. 웹의 비상 정지는 소프트웨어 정지일 뿐입니다.</div>
+
+<section>
+  <h2><span class="tag">A</span>터미널 준비 (서버 PC)</h2>
+  <ol class="steps">
+    <li>
+      <h3>빌드 — 모든 팀원 PC에서 한 번</h3>
+      <p>액션 메시지(<code>Process.action</code>)에 <code>wall</code> 필드가 추가됐습니다. 한 PC라도 옛 빌드면 액션 통신이 안 됩니다.</p>
+<pre>cd ~/ws_cobot_pjt/ws_dsr
+colcon build --packages-select rokey_interfaces rokey1
+source install/setup.bash</pre>
+      <label class="check"><input type="checkbox" id="c-build"> 빌드 성공, 새 터미널마다 source 함</label>
+    </li>
+    <li>
+      <h3>DB 접속 확인</h3>
+      <p>접속 정보는 <code>config/robot.yaml</code>의 <code>db</code> 섹션입니다.</p>
+<pre>mysql -u cobot -pcobot cobot -e "SHOW TABLES;"   <span class="c"># run, wall, gap, task_log, quality</span></pre>
+      <label class="check"><input type="checkbox" id="c-db"> 테이블 5개가 보임</label>
+    </li>
+    <li>
+      <h3>로봇 bringup</h3>
+<pre><span class="c"># 가상 (에뮬레이터)</span>
+ros2 launch dsr_bringup2 dsr_bringup2_rviz.launch.py mode:=virtual host:=127.0.0.1 port:=12345 model:=m0609
+<span class="c"># 실제 로봇이면 mode:=real 과 컨트롤러 IP</span></pre>
+      <label class="check"><input type="checkbox" id="c-bringup"> RViz에 로봇이 보이고 오류 없음</label>
+    </li>
+    <li>
+      <h3>웹 HMI 서버</h3>
+<pre>ros2 launch rokey1 process.launch.py host:=0.0.0.0     <span class="c"># 다른 PC에서도 접속</span>
+<span class="c"># 로봇 없이 DB 흐름만: ros2 launch rokey1 process.launch.py fake:=true</span></pre>
+      <p>브라우저 주소: <code>http://&lt;서버 PC IP&gt;:8080</code></p>
+      <label class="check"><input type="checkbox" id="c-hmi"> 웹 페이지가 열림</label>
+    </li>
+  </ol>
+</section>
+
+<section>
+  <h2><span class="tag">B</span>웹 HMI에서</h2>
+  <ol class="steps">
+    <li>
+      <h3>연결 상태 보기</h3>
+      <p>맨 위 연결 칩이 초록인지, <span class="ui">통신</span> 모듈의 <b>두산 서비스</b>가 연결이고 <b>/joint_states</b>가 0 Hz가 아닌지 봅니다.</p>
+      <label class="check"><input type="checkbox" id="c-link"> 화면↔서버, 두산 서비스, joint_states 정상</label>
+    </li>
+    <li>
+      <h3>모드와 속도</h3>
+      <p><span class="ui">작업 실행</span> 모듈 아래 모드를 bringup과 같게(<span class="ui">가상</span> / <span class="ui">실제</span>) 고릅니다. 속도 슬라이더는 처음엔 30~50%.</p>
+      <label class="check"><input type="checkbox" id="c-mode"> 모드 = bringup mode, 속도 낮춤</label>
+    </li>
+    <li>
+      <h3>액션 서버 3개 켜기 (모드를 정한 뒤에)</h3>
+      <p>각 탭에서 선택하고 <span class="ui">▶ 시작</span>. 끝나는 작업이 아니라 계속 켜 두는 서버입니다. 서버는 켤 때의 모드로 동작하므로, 모드를 바꿨으면 정지 후 다시 켭니다.</p>
+      <div class="tbl"><table>
+        <thead><tr><th>탭</th><th>작업</th><th>로그에 나오면 준비 완료</th></tr></thead>
+        <tbody>
+          <tr><td><span class="ui">벽면 탐색</span></td><td>탐색 액션 서버</td><td><code>/process/explore 준비</code></td></tr>
+          <tr><td><span class="ui">퍼티</span></td><td>퍼티 액션 서버</td><td><code>퍼티 액션 준비</code></td></tr>
+          <tr><td><span class="ui">샌딩</span></td><td>샌딩 액션 서버</td><td>goal 대기 로그 (RG2 /onrobot 필요)</td></tr>
+        </tbody>
+      </table></div>
+      <label class="check"><input type="checkbox" id="c-servers"> 필요한 서버가 실행 중 (탐색만 할 땐 탐색 서버만)</label>
+    </li>
+    <li>
+      <h3>탐색</h3>
+      <p><span class="ui">공정</span> 탭 → <b>탐색</b> → 아래 파라미터 입력 → <span class="ui">▶ 시작</span>. 로봇이 바닥 → 벽 → 높이 → 너비를 찍어서 잽니다. <span class="ui">실시간 작업 현황</span> 탭에서 로그를 봅니다.</p>
+      <p>끝나면 로그에 <code>wall_id=… · gap_id=[…]</code>가 찍힙니다. <b>이 gap_id를 적어 두세요.</b> 비어 있으면 <code>robot.yaml</code>의 <code>explore.gaps</code>에 틈 좌표를 넣고 다시 탐색합니다(틈 자동 감지는 아직 없음).</p>
+      <label class="check"><input type="checkbox" id="c-explore"> 결과 OK, gap_id 확인함</label>
+    </li>
+    <li>
+      <h3>틈 하나로 퍼티 → 샌딩</h3>
+      <p><span class="ui">공정</span> → <b>퍼티</b> → <b>틈 번호 (gap_id)</b>에 위 번호 → 시작. 끝나면 같은 번호로 <b>샌딩</b>. 샌딩은 그 틈의 벽 4점으로 벽 방향을 계산하고, 누르는 힘은 <code>robot.yaml force.sanding.press_force</code> 값을 씁니다.</p>
+      <label class="check"><input type="checkbox" id="c-one"> 한 틈 퍼티·샌딩 OK</label>
+    </li>
+    <li>
+      <h3>전체 공정</h3>
+      <p><span class="ui">공정</span> → <b>전체 공정</b>. 탐색 → 틈마다 퍼티 → 틈마다 샌딩 순서로, 실패하면 그 자리에서 멈춥니다(재시도 없음).</p>
+      <label class="check"><input type="checkbox" id="c-all"> 전체 공정 OK</label>
+    </li>
+    <li>
+      <h3>결과 보기 · 멈추기</h3>
+      <p><span class="ui">실행 기록</span>에 결과(OK / STOP / E_xxx)가 남습니다. 멈출 땐 상단의 <span class="ui">■ 전체 정지</span>, 위험하면 <span class="ui">비상 정지</span>(Esc) → 원인 해결 후 RESET.</p>
+    </li>
+  </ol>
+</section>
+
+<section>
+  <h2><span class="tag">C</span>공정 파라미터 넣는 법</h2>
+  <div class="tbl"><table>
+    <thead><tr><th>항목</th><th>쓰는 작업</th><th>넣는 값</th><th></th></tr></thead>
+    <tbody>
+      <tr><td><b>틈 번호 (gap_id)</b></td><td>퍼티, 샌딩</td><td>탐색 로그의 <code>gap_id=[…]</code> 중 하나 (1 이상 정수). 빈 칸으로 시작하며 새로고침하면 다시 비워집니다 — 매번 입력</td><td><span class="pill p-req">필수</span></td></tr>
+      <tr><td>목적</td><td>4개 공정 모두</td><td><code>TEST</code> 시험 · <code>EXPERIMENT</code> 데이터 수집 · <code>DEMO</code> 시연. 분석할 때 이걸로 거릅니다</td><td><span class="pill p-opt">기본값 있음</span></td></tr>
+      <tr><td>재료</td><td>4개 공정 모두</td><td><code>clay</code> / <code>putty</code> — 실제로 쓴 재료</td><td><span class="pill p-opt">기본값 있음</span></td></tr>
+      <tr><td>메모</td><td>4개 공정 모두</td><td>바꾼 조건 등 (예: <code>press 15N</code>). 200자까지 입력됩니다</td><td><span class="pill p-opt">선택 입력</span></td></tr>
+    </tbody>
+  </table></div>
+  <p style="margin-top:10px">숫자 칸은 칸 아래 설명에 범위(예: <code>1 이상 · 정수</code>)가 나오고, 비우거나 범위를 벗어나면 시작할 때 어느 칸이 왜 틀렸는지 알려 주고 실행하지 않습니다. 액션 서버와 화면 모드가 다르면 공정 시작이 막힙니다. 파라미터 영역 오른쪽 위 <span class="ui">↺ 기본값으로</span> 버튼으로 되돌릴 수 있고, 기본값에서 바뀐 칸은 강조 표시됩니다. 틈 번호 외의 입력값은 브라우저에 저장돼 다음에도 남아 있습니다.</p>
+</section>
+
+<section>
+  <h2><span class="tag">D</span>안 될 때</h2>
+  <div class="tbl"><table>
+    <thead><tr><th>결과 / 증상</th><th>원인 · 할 일</th></tr></thead>
+    <tbody>
+      <tr><td><code>E_NO_SERVER</code></td><td>그 공정의 액션 서버가 안 켜짐 → B-3</td></tr>
+      <tr><td><code>E_NO_GAP</code></td><td>gap_id가 DB에 없음, 또는 explore.gaps 비어 있음</td></tr>
+      <tr><td><code>E_NO_WALL</code></td><td>샌딩: 벽 4점 없음 · 퍼티: 벽이 +X 정면에서 5° 넘게 기울어짐</td></tr>
+      <tr><td><code>E_FORCE</code> (퍼티)</td><td><code>robot.yaml force.putty_load</code> 값이 비어 있음 → 퍼티 담당이 값 확정</td></tr>
+      <tr><td><code>E_DB</code></td><td>DB 연결 또는 저장 실패 → <code>~/ws_cobot_pjt/logs/pending.jsonl</code>, <code>rejected.jsonl</code> 확인</td></tr>
+      <tr><td>어디서 막혔는지</td><td>DB: <code>SELECT step, success, error_code, fail_reason FROM task_log WHERE run_id=… ORDER BY log_id;</code>에서 <code>success=0</code> 첫 줄<br>ROS: <code>ros2 action list -t</code>, <code>rqt_console</code>(Error 필터), <code>rqt_graph</code></td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<footer>자세한 구조·검증 방법은 분석 문서(<code>docs/code_analysis.html</code>)의 웹 페이지 구성 · 검증 섹션을 보세요.</footer>
+</div>
+
+<script>
+(function(){
+  var KEY='rokey1-run-guide';
+  var saved={};
+  try{saved=JSON.parse(localStorage.getItem(KEY))||{};}catch(e){saved={};}
+  document.querySelectorAll('.check input').forEach(function(el){
+    if(saved[el.id]) el.checked=true;
+    el.addEventListener('change',function(){
+      saved[el.id]=el.checked;
+      try{localStorage.setItem(KEY,JSON.stringify(saved));}catch(e){}
+    });
+  });
+})();
+</script>

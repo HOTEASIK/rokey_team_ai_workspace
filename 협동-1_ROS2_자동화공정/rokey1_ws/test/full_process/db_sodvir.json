@@ -1,0 +1,166 @@
+{
+  "run": [
+    {
+      "run_id": 1,
+      "process": "ALL",
+      "gap_id": null,
+      "mode": "virtual",
+      "purpose": "TEST",
+      "material": "clay",
+      "note": null,
+      "result": "E_EXPLORE",
+      "data_check": "wall/gap 없음"
+    },
+    {
+      "run_id": 2,
+      "process": "ALL",
+      "gap_id": null,
+      "mode": "real",
+      "purpose": "TEST",
+      "material": "clay",
+      "note": null,
+      "result": "E_EXPLORE",
+      "data_check": "wall/gap 없음"
+    },
+    {
+      "run_id": 3,
+      "process": "ALL",
+      "gap_id": null,
+      "mode": "real",
+      "purpose": "TEST",
+      "material": "clay",
+      "note": null,
+      "result": "STOP",
+      "data_check": "task_log 없음, wall/gap 없음"
+    },
+    {
+      "run_id": 4,
+      "process": "ALL",
+      "gap_id": null,
+      "mode": "real",
+      "purpose": "TEST",
+      "material": "clay",
+      "note": null,
+      "result": "E_EXPLORE",
+      "data_check": "wall/gap 없음"
+    },
+    {
+      "run_id": 5,
+      "process": "ALL",
+      "gap_id": null,
+      "mode": "real",
+      "purpose": "TEST",
+      "material": "clay",
+      "note": null,
+      "result": "E_EXPLORE",
+      "data_check": "wall/gap 없음"
+    },
+    {
+      "run_id": 6,
+      "process": "ALL",
+      "gap_id": null,
+      "mode": "real",
+      "purpose": "TEST",
+      "material": "clay",
+      "note": null,
+      "result": "E_EXPLORE",
+      "data_check": "wall/gap 없음"
+    },
+    {
+      "run_id": 7,
+      "process": "ALL",
+      "gap_id": null,
+      "mode": "real",
+      "purpose": "TEST",
+      "material": "clay",
+      "note": null,
+      "result": "E_EXPLORE",
+      "data_check": "wall/gap 없음"
+    },
+    {
+      "run_id": 8,
+      "process": "ALL",
+      "gap_id": null,
+      "mode": "real",
+      "purpose": "TEST",
+      "material": "clay",
+      "note": null,
+      "result": "E_EXPLORE",
+      "data_check": "wall/gap 없음"
+    }
+  ],
+  "wall": [],
+  "gap": [],
+  "task_log": [
+    {
+      "run_id": 1,
+      "task_code": "EXPLORE",
+      "gap_id": -1,
+      "step": "explore_result",
+      "success": false,
+      "error_code": "E_EXPLORE",
+      "fail_reason": "ToolCollision: [TOOL_OVERLOAD] 툴 힘 40.2N ≥ 40N (접촉 예상 없는 이동 중) (기준선 대비 힘 9.6N / 모멘트 0.00Nm, 절대 40.2N / 0.00Nm)",
+      "params": ""
+    },
+    {
+      "run_id": 2,
+      "task_code": "EXPLORE",
+      "gap_id": -1,
+      "step": "explore_result",
+      "success": false,
+      "error_code": "E_EXPLORE",
+      "fail_reason": "ToolCollision: [TOOL_OVERLOAD] 툴 힘 42.8N ≥ 40N (접촉 예상 없는 이동 중) (기준선 대비 힘 18.2N / 모멘트 1.35Nm, 절대 42.8N / 0.96Nm)",
+      "params": ""
+    },
+    {
+      "run_id": 4,
+      "task_code": "EXPLORE",
+      "gap_id": -1,
+      "step": "explore_result",
+      "success": false,
+      "error_code": "E_EXPLORE",
+      "fail_reason": "ToolCollision: [TOOL_OVERLOAD] 툴 힘 50.7N ≥ 40N (접촉 예상 없는 이동 중) (기준선 대비 힘 30.9N / 모멘트 1.20Nm, 절대 50.7N / 2.13Nm)",
+      "params": ""
+    },
+    {
+      "run_id": 5,
+      "task_code": "EXPLORE",
+      "gap_id": -1,
+      "step": "explore_result",
+      "success": false,
+      "error_code": "E_EXPLORE",
+      "fail_reason": "ToolCollision: [TOOL_OVERLOAD] 툴 힘 49.0N ≥ 40N (접촉 예상 없는 이동 중) (기준선 대비 힘 28.3N / 모멘트 2.50Nm, 절대 49.0N / 1.49Nm)",
+      "params": ""
+    },
+    {
+      "run_id": 6,
+      "task_code": "EXPLORE",
+      "gap_id": -1,
+      "step": "explore_result",
+      "success": false,
+      "error_code": "E_EXPLORE",
+      "fail_reason": "ToolCollision: [TOOL_OVERLOAD] 툴 힘 42.3N ≥ 40N (접촉 예상 없는 이동 중) (기준선 대비 힘 14.1N / 모멘트 1.68Nm, 절대 42.3N / 1.52Nm)",
+      "params": ""
+    },
+    {
+      "run_id": 7,
+      "task_code": "EXPLORE",
+      "gap_id": -1,
+      "step": "explore_result",
+      "success": false,
+      "error_code": "E_EXPLORE",
+      "fail_reason": "ToolCollision: [TOOL_OVERLOAD] 툴 힘 41.5N ≥ 40N (접촉 예상 없는 이동 중) (기준선 대비 힘 7.9N / 모멘트 1.08Nm, 절대 41.5N / 6.01Nm)",
+      "params": ""
+    },
+    {
+      "run_id": 8,
+      "task_code": "EXPLORE",
+      "gap_id": -1,
+      "step": "explore_result",
+      "success": false,
+      "error_code": "E_EXPLORE",
+      "fail_reason": "ToolCollision: [TOOL_OVERLOAD] 툴 힘 40.2N ≥ 40N (접촉 예상 없는 이동 중) (기준선 대비 힘 17.8N / 모멘트 1.90Nm, 절대 40.2N / 2.40Nm)",
+      "params": ""
+    }
+  ]
+}

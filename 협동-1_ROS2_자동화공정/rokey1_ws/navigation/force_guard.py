@@ -46,8 +46,19 @@ import numpy as np
 TOOL_HARD_LIMIT = 40.0      # [N]  툴 힘 크기 상한 (어느 방향이든)
 FREE_MOVE_LIMIT = 15.0      # [N]  접촉을 예상하지 않는 일반 이동 중 상한
 SIDE_LIMIT = 15.0           # [N]  예상 방향에 수직인 힘 상한
-TORQUE_LIMIT = 4.0          # [Nm] 툴 모멘트 크기 상한
+TORQUE_LIMIT = 5.0          # [Nm] 툴 모멘트 크기 상한 (4.0 → 5.0: 이동 중 3.5Nm 안팎이 자주 나와서)
 WARN_RATIO = 0.7            # 상한의 이 비율 이상이면 경고
+
+# 접촉 예상 없는 이동의 판정 방식 (free_mode)
+#   abs      : |힘| ≥ FREE_MOVE_LIMIT 이면 바로 충돌 (기존, wall_size 기본)
+#   baseline : 천천히 따라가는 기준선(시상수 FREE_TAU)과의 '차이' 가 FREE_MOVE_LIMIT(힘) / TORQUE_LIMIT(모멘트)
+#              이상으로 FREE_HOLD 동안 유지될 때만 충돌. 자세가 바뀌며 생기는 추정 오차(서서히/한 번 튀고 일정)는
+#              기준선이 흡수하고, 계속 커지는 진짜 충돌만 잡는다. 절대값 FREE_HARD(힘) / FREE_MHARD(모멘트) 는 그대로 즉시 정지.
+FREE_TAU = 0.5              # [s]  기준선 시상수 (작을수록 계단형 오차를 빨리 흡수, 느린 충돌도 흡수할 위험)
+FREE_HOLD = 0.3             # [s]  차이가 이 시간 동안 유지돼야 충돌
+FREE_HARD = 40.0            # [N]  baseline 모드에서도 이 이상이면 즉시 충돌
+FREE_MHARD = 8.0            # [Nm] baseline 모드에서도 이 이상이면 즉시 충돌
+FREE_GAP = 0.5              # [s]  접촉 없는 이동 검사가 이 시간 이상 끊겼으면 새 이동 → 기준선 다시 잡음
 
 # 암 외력 토크: 관절별 기준 상한 [Nm] + 툴 힘이 만드는 몫(|F| × 팔 길이 근사 [m])
 #   툴로 벽을 누르면 관절에도 토크가 생기므로, 그만큼은 '정상'으로 빼준다 (보수적 근사).
@@ -166,7 +177,7 @@ class Injector:
 # =============================================================================
 class ForceGuard:
     """사용법:
-        guard = ForceGuard(io)               # io: wall_size.SizeIO (RobotIO 계열)
+        guard = ForceGuard(io)               # io: wall_size.SizeIO
         guard.zero()                         # 접촉 없는 정지 상태에서 관절 토크 영점
         ...
         w = guard.check(pos, wrench, expected=(APP_DIR,), context='seek')   # 루프마다
@@ -186,6 +197,15 @@ class ForceGuard:
         self._t_arm = self._t_state = 0.0
         self._t_warn = 0.0
         self._last_ext = np.zeros(6)
+        # 접촉 없는 이동 판정 (free_mode='baseline')
+        self.free_mode = 'abs'
+        self.free_tau, self.free_hold = FREE_TAU, FREE_HOLD
+        self.free_hard, self.free_mhard = FREE_HARD, FREE_MHARD
+        self._fbase = None                  # 기준선 wrench (6,)
+        self._ft = 0.0                      # 마지막 접촉 없는 이동 검사 시각
+        self._fsince = None                 # 차이가 상한을 넘기 시작한 시각
+        self.last_w = None                  # 마지막으로 검사한 wrench (기록용, 충돌 순간 포함)
+        self.last_dev = (0.0, 0.0)          # 마지막 기준선 차이 (힘 N, 모멘트 Nm)
 
     # ------------------------------------------------------------ 준비
     def wait_for_services(self):
@@ -239,6 +259,7 @@ class ForceGuard:
             return np.zeros(6)
         self._fails = 0
         w = self.inj.wrench(wrench)
+        self.last_w = np.asarray(w, float)
         self._check_tool(w, expected, context, pos)
 
         # ② 암 외력 토크 (주기적으로)
@@ -255,6 +276,10 @@ class ForceGuard:
     def ok_streak(self):
         """선 하나를 문제 없이 끝냈을 때 호출 → 연속 충돌 수 초기화."""
         self.tool_streak = 0
+
+    def free_reset(self):
+        """기준선을 버림 (영점을 다시 잡아 측정값이 바뀌었을 때 등). 다음 검사 값이 새 기준선."""
+        self._fbase, self._fsince = None, None
 
     def reset(self):
         """회복 처리를 마친 뒤 호출 (tripped 해제)."""
@@ -317,6 +342,11 @@ class ForceGuard:
     def _check_tool(self, w, expected, context, pos):
         f, m = np.asarray(w[:3], float), np.asarray(w[3:6], float)
         fn, mn = float(np.linalg.norm(f)), float(np.linalg.norm(m))
+        if not expected and self.free_mode == 'baseline':
+            self._check_free(np.asarray(w[:6], float), fn, mn, context, pos)
+            return
+        self._fbase = None                  # 접촉 이동이 끼면 다음 접촉 없는 이동에서 기준선을 새로
+        self.last_dev = (0.0, 0.0)
 
         if expected:
             hard = TOOL_HARD_LIMIT
@@ -347,6 +377,43 @@ class ForceGuard:
             self._t_warn = time.time()
             self.io.node.get_logger().info(f'[가드] 경고: 힘 {fn:.1f}N / 옆 {sn:.1f}N / 모멘트 {mn:.2f}Nm '
                                            f'(상한의 {ratio * 100:.0f}%, {context})')
+
+    def _check_free(self, w, fn, mn, context, pos):
+        """접촉 없는 이동, 기준선 방식. 기준선 = 지수이동평균 (시상수 free_tau)."""
+        now = time.time()
+        if self._fbase is None or now - self._ft > FREE_GAP:
+            self._fbase, self._fsince = w.copy(), None
+        dt = max(0.0, now - self._ft)
+        self._ft = now
+        dev = w - self._fbase
+        fd, md = float(np.linalg.norm(dev[:3])), float(np.linalg.norm(dev[3:6]))
+        self.last_dev = (fd, md)
+        base_s = f'(기준선 대비 힘 {fd:.1f}N / 모멘트 {md:.2f}Nm, 절대 {fn:.1f}N / {mn:.2f}Nm)'
+
+        if fn >= self.free_hard:
+            self._trip(ToolCollision, 'TOOL_OVERLOAD', f'툴 힘 {fn:.1f}N ≥ {self.free_hard:.0f}N (접촉 예상 없는 이동 중) {base_s}',
+                       context, pos, w, value=fn, limit=self.free_hard)
+        if mn >= self.free_mhard:
+            self._trip(ToolCollision, 'TOOL_TORQUE', f'툴 모멘트 {mn:.2f}Nm ≥ {self.free_mhard:.1f}Nm (접촉 예상 없는 이동 중) {base_s}',
+                       context, pos, w, value=mn, limit=self.free_mhard)
+        if fd >= FREE_MOVE_LIMIT or md >= TORQUE_LIMIT:
+            if self._fsince is None:
+                self._fsince = now
+            elif now - self._fsince >= self.free_hold:
+                kind, val, lim = (('TOOL_OVERLOAD', fd, FREE_MOVE_LIMIT) if fd / FREE_MOVE_LIMIT >= md / TORQUE_LIMIT
+                                  else ('TOOL_TORQUE', md, TORQUE_LIMIT))
+                self._trip(ToolCollision, kind, f'기준선 대비 급변이 {self.free_hold:.1f}s 유지 {base_s}',
+                           context, pos, w, value=val, limit=lim)
+        else:
+            self._fsince = None
+        # 기준선 갱신 (계단형/서서히 생기는 추정 오차는 free_tau 동안 흡수됨)
+        a = min(1.0, dt / max(self.free_tau, 1e-3))
+        self._fbase = self._fbase + a * (w - self._fbase)
+
+        ratio = max(fd / FREE_MOVE_LIMIT, md / TORQUE_LIMIT, fn / self.free_hard, mn / self.free_mhard)
+        if ratio >= WARN_RATIO and now - self._t_warn > 1.0:
+            self._t_warn = now
+            self.io.node.get_logger().info(f'[가드] 경고: {base_s} (상한의 {ratio * 100:.0f}%, {context})')
 
     def _check_arm(self, w, context, pos):
         raw = self._read_ext_raw()

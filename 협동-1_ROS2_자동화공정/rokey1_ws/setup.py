@@ -1,4 +1,5 @@
 from glob import glob
+
 from setuptools import find_packages, setup
 
 package_name = 'rokey1'
@@ -12,8 +13,10 @@ setup(
             ['resource/' + package_name]),
         ('share/' + package_name, ['package.xml']),
         ('share/' + package_name + '/launch', glob('launch/*.launch.py')),
-        ('share/' + package_name + '/urdf', glob('urdf/*.xacro')),
+        ('share/' + package_name + '/urdf', glob('urdf/*')),
     ],
+    # 웹 HMI 정적 파일은 hmi 패키지 데이터로 설치 (hmi_server 가 hmi/web 에서 서빙)
+    # ※ data_files 로 넣으면 colcon --symlink-install 에서 새 파일 설치가 실패하는 버그가 있음
     package_data={'hmi': ['web/*']},
     include_package_data=True,
     install_requires=['setuptools'],
@@ -32,22 +35,28 @@ setup(
             'move = rokey1.move:main',
             'grip_test = rokey1.grip_test:main',
             'homeset = rokey1.homeset:main',
+            'tape_locate = tape.tape_locate:main',
+            'tape_peel = tape.tape_peel:main',
+            # ===== HMI =====
             'hmi_server = hmi.hmi_server:main',
-            'wall_size = navigation.wall_size:main',
-            'wall_navigation = navigation.wall_navigation:main',
-            'table_navigation = navigation.table_navigation:main',
-            'wall_modeling = navigation.wall_modeling:main',
-            'wall_size_rviz = navigation.wall_size_rviz:main',
-            'navigation_rviz_sim = navigation.rviz_sim_node:main',
-            'tool_task_server = sanding.tool_task_action_server:main',
-            'tool_task_client = sanding.tool_task_client:main',
-            'sanding_server = sanding.sanding_server:main',
-            'sanding_client = sanding.sanding_client:main',
+            # ===== navigation =====
+            'wall_tap = navigation.wall_tap:main',
+            'pick_tap = navigation.pick_tap:main',   # 물건 집기 → 관절 0 → 홈 → wall_tap → 홈
+            'explore_server = navigation.explore_server:main',   # /process/explore (wall_tap → DB)
+            # ===== putty_demo =====
             'initialize_device = putty_demo.initialize_device:main',
             'pickup_spatula = putty_demo.pickup_spatula:main',
             'scoop_putty = putty_demo.scoop_putty:main',
             'apply_putty_plane = putty_demo.apply_putty_plane:main',
             'return_spatula = putty_demo.return_spatula:main',
+            'putty_task_server = putty_demo.putty_task_server:main',
+            'putty_task_client = putty_demo.putty_task_client:main',
+            # ===== sanding =====
+            'tool_task_server = sanding.sanding_server:main',     # HMI [샌딩 액션 서버] 버튼
+            'sanding_server = sanding.sanding_server:main',
+            'sanding_client = sanding.sanding_client:main',
+            # ===== 공정 테스트 =====
+            'fake_process = manager.fake_process:main',
         ],
     },
 )

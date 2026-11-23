@@ -1,0 +1,7 @@
+# sodvir 전체 공정 테스트에서만 robot.yaml 위에 덮어쓰는 값 (utils/config.py ROKEY_CONFIG_OVERRIDE)
+# 실제 robot.yaml 은 바꾸지 않는다.
+
+explore:
+  # wall_tap 가상 벽 (navigation/wall_tap.py vbox_*: 표면 x=720, 바닥 z=95, 윗면 z=290, y ±200) 가운데 세로 틈 1개
+  gaps:
+    - [720.0, 0.0, 130.0, 720.0, 0.0, 250.0]
