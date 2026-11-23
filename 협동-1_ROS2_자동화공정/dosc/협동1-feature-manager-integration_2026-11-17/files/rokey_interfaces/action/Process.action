@@ -1,0 +1,28 @@
+# 매니저 → 공정 노드(탐색/퍼티/샌딩) 공통 작업 양식
+# ── Goal ─────────────────────────────────────────────
+string task_code        # EXPLORE / PUTTY / SANDING
+int32  run_id           # command.cmd_id (한 번의 시작~종료 묶음)
+int32  gap_id           # 탐색은 -1
+float64[3] start_point  # base 기준 [x, y, z] mm
+float64[3] end_point
+---
+# ── Result ───────────────────────────────────────────
+bool   success
+string error_code       # "" | E_GRIP | E_FORCE | E_SINGULAR | E_TIMEOUT | E_NO_GAP
+string message
+float64[12] wall        # 탐색만: top, floor, right, left 각 [x,y,z]
+float64[]   gaps        # 탐색만: 틈 1개당 [sx,sy,sz, ex,ey,ez]
+---
+# ── Feedback (세부동작 하나 끝날 때마다 1회 → task_log 1줄) ──
+string  state           # RUNNING / PAUSED / ERROR
+string  step            # 대분류_소분류 (robot.yaml force 키와 같은 이름)
+bool    step_success
+string  error_code      # 실패 시 E_xxx, 성공이면 ""
+string  fail_reason     # 사람이 읽는 설명
+float64[6] joint
+float64[6] task
+float64[6] force
+int32   duration_ms
+string  params_json     # 이 동작에 실제로 쓴 파라미터 JSON ('{"target_fz":-10,"vel":30}'), 없으면 ""
+float32 contact_ratio -1.0   # 목표 힘 ±tol 안 비율 0~1, 기본 -1 = 힘제어 없는 동작  (utils.force_stats.summarize)
+string  force_stats_json  # '{"fz_mean":..,"fz_min":..,"fz_max":..,"fz_std":..,"n":..}', 없으면 ""

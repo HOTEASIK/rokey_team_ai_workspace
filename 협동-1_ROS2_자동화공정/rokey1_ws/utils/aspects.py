@@ -20,8 +20,7 @@ import DR_init
 
 from utils.shutdown import safe_shutdown
 
-DEFAULT_ROBOT_ID = 'dsr01'
-DEFAULT_ROBOT_MODEL = 'm0609'
+from utils.robot import ROBOT_ID as DEFAULT_ROBOT_ID, ROBOT_MODEL as DEFAULT_ROBOT_MODEL  # config/robot.yaml
 
 
 class DsrApp:
@@ -36,6 +35,16 @@ class DsrApp:
     def on_shutdown(self, message, fn):
         """종료 시 실행할 정리 동작을 등록한다 (등록 순서대로 실행, 실패해도 계속)."""
         self._cleanups.append((message, fn))
+
+
+def create_dsr_node(node_name, robot_id=DEFAULT_ROBOT_ID, robot_model=DEFAULT_ROBOT_MODEL):
+    """DR_init 에 id/model/node 를 넣고 노드를 돌려준다. rclpy.init 뒤, DSR_ROBOT2 import 전에 부른다.
+    (wall_navigation / wall_scanner 가 사용)"""
+    DR_init.__dsr__id = robot_id
+    DR_init.__dsr__model = robot_model
+    node = rclpy.create_node(node_name, namespace=robot_id)
+    DR_init.__dsr__node = node
+    return node
 
 
 def dsr_main(node_name, robot_id=DEFAULT_ROBOT_ID, robot_model=DEFAULT_ROBOT_MODEL):

@@ -9,7 +9,7 @@
 .mode-value.bad span{background:var(--red);box-shadow:0 0 8px var(--red)}
 
 /* --- 작업 선택 --- */
-.task-tabs{display:grid;grid-template-columns:repeat(3,1fr);margin:0 12px 8px;border:1px solid #555a5a}
+.task-tabs{display:grid;grid-template-columns:repeat(4,1fr);margin:0 12px 8px;border:1px solid #555a5a}
 .task-tab{height:28px;border:0;background:#2a2d2f;color:#8d9391;font-family:var(--mono);font-size:9px;letter-spacing:.08em;cursor:pointer}
 .task-tab+.task-tab{border-left:1px solid #555a5a}
 .task-tab.active{background:var(--orange);color:#1b1c1d;font-weight:700}
@@ -582,7 +582,7 @@ button,.task-item,.page-tab,.task-tab,.mode-btn,.layout-btn,.console-filter,inpu
 /* ===== 로봇 자세 뷰 (관절 원 + 링크 선 + 그리퍼 TCP, 고정 등각 시점) ===== */
 .sim-content{grid-template-columns:minmax(0,1fr) 230px}
 .viz-arm{position:relative;background:#191c1e;display:flex;min-width:0}
-.viz-arm svg{width:100%;height:100%;min-height:540px;display:block}
+.viz-arm svg{width:100%;height:100%;min-height:380px;display:block}
 .viz-arm .map-corner.br{right:16px;bottom:12px;top:auto;left:auto}
 .viz-arm .g{stroke:rgba(255,255,255,.055);stroke-width:2}
 .viz-arm .g.axis{stroke:rgba(255,255,255,.14);stroke-width:2.5}
@@ -633,175 +633,122 @@ button,.task-item,.page-tab,.task-tab,.mode-btn,.layout-btn,.console-filter,inpu
   }
 }
 
-/* =====================================================================
-   화이트 모드 (2026-11-16 추가)
-   - 기본 = 화이트, 다크는 <html data-theme="dark"> 일 때 (위의 기존 색상 그대로)
-   - 전환: 상단 오른쪽 ◐ 버튼 (선택은 localStorage 에 저장)
-   - 아래 규칙은 :root[data-theme="light"] 아래에서만 동작하므로 다크 모드엔 영향 없음
-   ===================================================================== */
-.theme-toggle{display:inline-flex;align-items:center;gap:6px;height:32px;padding:0 12px;border:1px solid var(--line);background:transparent;color:var(--muted);font-family:var(--sans);font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap}
-.theme-toggle:hover{color:var(--text);border-color:var(--orange)}
+/* ===== 간편 / 전문가 모드 ===== */
+.ui-mode-toggle{display:flex;border:1px solid var(--line)}
+.ui-mode-toggle button{height:32px;padding:0 14px;border:0;background:none;color:var(--muted);font-size:13px;font-weight:700;cursor:pointer}
+.ui-mode-toggle button.active{background:var(--orange);color:#1b1c1d}
+/* 간편 모드: '작업 실행' 모듈만 표시, 실시간 작업 현황 탭 숨김 */
+body.simple .page-tabs,
+body.simple #pageControl>.module:not(.control-module){display:none}
+body.simple #pageControl{grid-template-columns:minmax(0,760px);grid-template-areas:"ctrl";grid-template-rows:auto;justify-content:center}
 
-:root[data-theme="light"]{
-  color-scheme:light;
-  --bg:#f3f5f7;--panel:#ffffff;--panel-2:#f6f8fa;--panel-3:#e8ecf0;
-  --line:#d3dae1;--line-soft:#e5e9ed;
-  --text:#1f2933;--muted:#5b6772;--dim:#8a949e;
-  --orange:#d9600f;--orange-2:#c2530a;--red:#c62d2d;
-  --green:#2f7d5b;--amber:#a86a00;--blue:#5b6772;
-}
-:root[data-theme="dark"]{color-scheme:dark}
+/* ===== 간편 모드 = 키오스크 (큰 글씨 · 큰 터치 버튼) ===== */
+body.simple{user-select:none;-webkit-user-select:none;touch-action:manipulation}
+body.simple .app-footer,
+body.simple #pageControl .param-head-note,
+body.simple #pageControl .hint,
+body.simple #pageControl .pf-help,
+body.simple #pageControl .task-item small,
+body.simple #pageControl .control-row{display:none}
+body.simple #pageControl{grid-template-columns:minmax(0,1000px)}
+body.simple #pageControl .module-head{font-size:22px;padding:18px 20px}
+body.simple #pageControl .task-tabs{margin:0 20px 14px}
+body.simple #pageControl .task-tab{height:64px;font-size:22px}
+body.simple #pageControl .task-list{grid-template-columns:repeat(2,1fr);gap:12px;margin:0 20px}
+body.simple #pageControl .task-item{height:76px;padding:0 20px;justify-content:center}
+body.simple #pageControl .task-item b{font-size:22px}
+body.simple #pageControl .task-desc{font-size:17px;margin:14px 20px}
+body.simple #pageControl .param-head{margin:0 20px 8px;font-size:16px}
+body.simple #pageControl .param-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;margin:0 20px 16px;max-height:none}
+body.simple #pageControl .pf-label{font-size:17px}
+body.simple #pageControl .param-field input,
+body.simple #pageControl .param-field select{height:54px;font-size:20px}
+body.simple #pageControl .mode-toggle{margin:0 20px 14px}
+body.simple #pageControl .mode-btn{height:56px;font-size:19px;padding:0 26px}
+body.simple #pageControl .real-warning{font-size:17px;margin:0 20px 14px}
+body.simple #pageControl .speed-block{margin:0 20px 16px;padding:16px}
+body.simple #pageControl .speed-value{font-size:30px}
+body.simple #pageControl .action-row{padding:0 20px 14px;gap:14px}
+body.simple #pageControl .action-btn{height:96px;font-size:30px}
+body.simple #pageControl .action-btn span{font-size:26px}
+body.simple #pageControl .action-btn.home{height:64px;font-size:22px}
+body.simple #pageControl .estop-btn{height:110px;margin:4px 20px 20px;width:calc(100% - 40px)}
+body.simple #pageControl .estop-btn b{font-size:30px}
+body.simple #pageControl .estop-btn small{font-size:15px}
+body.simple #pageControl .estop-ring{width:60px;height:60px;font-size:32px}
 
-/* 상태 점 / 보조 글자 */
-:root[data-theme="light"] .link-dot{background:#aab2ba}
-:root[data-theme="light"] .link-dot.green{background:var(--green)}
-:root[data-theme="light"] .link-dot.amber{background:var(--amber)}
-:root[data-theme="light"] .link-dot.red{background:var(--red)}
-:root[data-theme="light"] .device-row .link-icon,
-:root[data-theme="light"] .speed-scale,
-:root[data-theme="light"] .param-head-note,
-:root[data-theme="light"] .hint,
-:root[data-theme="light"] .pf-help,
-:root[data-theme="light"] .alert-head time,
-:root[data-theme="light"] .alert-foot,
-:root[data-theme="light"] .run-item time{color:var(--muted)}
-:root[data-theme="light"] .param-head-note.changed{color:var(--orange)}
-:root[data-theme="light"] .task-desc{color:#46525d}
-:root[data-theme="light"] .pf-label{color:#2d3742}
-:root[data-theme="light"] .param-field.changed .pf-label{color:var(--orange)}
-:root[data-theme="light"] .pf-help em{color:#66717c}
-:root[data-theme="light"] .pf-help em.scale-tag{color:var(--orange)}
+/* ===== 조작 바 (두 페이지 공통: bringup · 속도 · 시작/정지/홈 · 비상 정지) ===== */
+.command-bar{display:flex;align-items:stretch;gap:20px;padding:12px 16px;background:var(--panel);border:1px solid var(--line)}
+.cb-main{flex:1;display:flex;flex-wrap:wrap;align-items:center;gap:12px 20px;min-width:0}
+.cb-group{display:flex;align-items:center;gap:8px}
+.cb-bringup{flex:none}
+.command-bar .speed-scale{display:none}
+.cb-mode{display:flex;align-items:center;gap:10px;min-width:210px;height:48px;padding:0 14px;border:1px solid var(--line);background:var(--panel-2)}
+.cb-mode i{width:10px;height:10px;border-radius:50%;background:var(--muted);flex:none}
+.cb-mode b{display:block;font-size:15px;font-weight:700}
+.cb-mode small{display:block;font-size:12px;color:var(--muted);margin-top:2px}
+.cb-mode[data-state="ok"] i{background:var(--green)}
+.cb-mode[data-state="wait"] i{background:var(--amber)}
+.cb-mode.real{border-color:#7a3739;background:#2a1d1f}
+.cb-mode.real b{color:#f2b3b3}
+.cb-btn{height:48px;min-width:92px;padding:0 14px;border:1px solid #474c4f;background:transparent;color:var(--text);cursor:pointer;text-align:center}
+.cb-btn b{display:block;font-size:14px;font-weight:700}
+.cb-btn small{display:block;font-size:11px;color:var(--muted)}
+.cb-btn:hover{border-color:#6a7073}
+.cb-btn.active{border-color:var(--green);background:#1c2a25}
+.cb-btn.real.active{border-color:var(--red);background:#3a2022}
+.cb-btn.ghost{border-style:dashed}
+.cb-btn:disabled{opacity:.35;cursor:default}
+.command-bar .speed-block{flex:none;display:flex;align-items:center;margin:0;padding:0 12px;height:48px;border:1px solid var(--line);gap:8px}
+.command-bar .speed-block input[type=range]{width:150px}
+.command-bar .speed-value{font-size:18px;min-width:52px;text-align:right}
+.command-bar .speed-warning{font-size:12px;color:#f2b3b3;white-space:nowrap}
+.command-bar .unlock-btn,.command-bar .mini-btn{height:30px;padding:0 8px}
+.command-bar .action-btn{height:48px;flex:none;padding:0 18px;font-size:15px}
+.command-bar .action-btn small{font-size:12px;font-weight:600;margin-left:4px;opacity:.75}
+.command-bar .cb-estop{margin:0;width:auto;height:auto;min-height:52px;min-width:150px;padding:0 22px;flex:none}
+/* 간편 모드: 터치하기 쉽게 키움 */
+body.simple .command-bar{padding:16px 20px}body.simple .cb-main{gap:14px 24px}
+body.simple .cb-mode,body.simple .cb-btn,body.simple .command-bar .speed-block{height:64px}
+body.simple .cb-btn b,body.simple .cb-mode b{font-size:18px}
+body.simple .command-bar .action-btn{height:72px;font-size:22px;padding:0 26px}
+body.simple .command-bar .cb-estop{min-width:190px;padding:0 26px}
+body.simple .command-bar .estop-btn b{font-size:22px}
 
-/* 입력 / 버튼 / 스위치 */
-:root[data-theme="light"] .param-field input[type=text],
-:root[data-theme="light"] .param-field input[type=number],
-:root[data-theme="light"] .param-field select,
-:root[data-theme="light"] .stdin-bar select,
-:root[data-theme="light"] .stdin-bar input{background:#fff;border-color:#bcc6cf;color:var(--text)}
-:root[data-theme="light"] .param-field.changed input,
-:root[data-theme="light"] .param-field.changed select{border-color:var(--orange)}
-:root[data-theme="light"] .control-module{border-color:#c5ccd3}
-:root[data-theme="light"] .task-item:hover{border-color:#aab4be}
-:root[data-theme="light"] .task-item.active{background:#fdf0e6}
-:root[data-theme="light"] .action-btn,
-:root[data-theme="light"] .action-btn.home{border-color:#b5bec7;color:var(--text)}
-:root[data-theme="light"] .action-btn:hover,
-:root[data-theme="light"] .action-btn.home:hover,
-:root[data-theme="light"] .icon-btn:hover,
-:root[data-theme="light"] .mini-btn:hover{border-color:#8d99a4}
-:root[data-theme="light"] .action-btn.start{color:#fff}
-:root[data-theme="light"] .page-tab.active{color:var(--text)}
-:root[data-theme="light"] .mini-btn{color:var(--text)}
-:root[data-theme="light"] .switch span{background:#c3cad1}
-:root[data-theme="light"] .switch span:before{background:#fff;box-shadow:0 1px 2px rgba(0,0,0,.25)}
-:root[data-theme="light"] .switch input:checked+span{background:#f4c9a6}
-:root[data-theme="light"] .switch input:checked+span:before{background:var(--orange)}
-:root[data-theme="light"] .speed-row input[type=range]{background:linear-gradient(90deg,var(--orange) var(--fill,100%),#d3dae1 var(--fill,100%))}
-:root[data-theme="light"] .speed-block.over input[type=range]{background:linear-gradient(90deg,var(--red) var(--fill,100%),#d3dae1 var(--fill,100%))}
-:root[data-theme="light"] .unlock-btn{color:var(--text)}
-:root[data-theme="light"] .unlock-btn.active{color:#fff}
+/* ===== 로그 탭 (작업 로그 / 로봇 bringup) ===== */
+.log-channels{display:flex;gap:4px}
+.log-channel{position:relative;height:34px;padding:0 14px;border:1px solid var(--line);background:transparent;color:var(--muted);font-size:14px;font-weight:700;cursor:pointer}
+.log-channel span{font-family:var(--mono);font-size:12px;font-weight:500;margin-left:4px}
+.log-channel.active{background:var(--panel-3);border-color:var(--orange);color:var(--text)}
+.log-channel i{position:absolute;top:5px;right:5px;width:7px;height:7px;border-radius:50%;background:var(--red)}
+.log-channel i[hidden]{display:none}
+.command-bar .action-btn:disabled small{opacity:1}
 
-/* 위험 / 경고 계열 (연한 빨강 배경 + 진한 빨강 글자) */
-:root[data-theme="light"] .real-warning,
-:root[data-theme="light"] .mode-btn[data-mode="real"].active,
-:root[data-theme="light"] .speed-block.unlocked,
-:root[data-theme="light"] .monitor-strip.alert,
-:root[data-theme="light"] .safety-banner.alert{background:#fdecec;border-color:#e3a3a3;color:#a02020}
-:root[data-theme="light"] .speed-block.unlocked{color:inherit}
-:root[data-theme="light"] .speed-warning{color:#b42323}
-:root[data-theme="light"] .unlock-btn:hover{border-color:#e3a3a3;color:#a02020}
-:root[data-theme="light"] .estop-btn,
-:root[data-theme="light"] .ms-estop{background:#fdecec;border-color:#e0a0a0;color:#a02020}
-:root[data-theme="light"] .estop-btn:hover,
-:root[data-theme="light"] .ms-estop:hover{background:#fbdcdc}
-:root[data-theme="light"] .estop-btn small,
-:root[data-theme="light"] .safety-banner.alert small{color:#b24a4a}
-:root[data-theme="light"] .estop-btn.triggered,
-:root[data-theme="light"] .ms-estop.triggered{background:var(--red);border-color:var(--red);color:#fff}
-:root[data-theme="light"] .estop-btn.triggered small{color:#ffe2e2}
+/* ===== TCP 카드: 경로 보기 / 좌표 보기 전환 ===== */
+.viz-arm[hidden]{display:none}
+.view-toggle{display:flex;gap:4px;padding:3px;border:1px solid var(--line);margin-left:auto;margin-right:16px}
+.view-btn{height:32px;padding:0 14px;border:0;border-bottom:2px solid transparent;background:none;color:var(--muted);font-size:13px;font-weight:700;cursor:pointer}
+.view-btn:hover{color:var(--text)}
+.view-btn.active{background:var(--panel-3);color:var(--text);border-bottom-color:var(--orange)}
+.posx-block{display:flex;flex-direction:column;gap:6px;padding:10px 0}
+.posx-block code{font-family:var(--mono);font-size:12px;color:var(--text);word-break:break-all;line-height:1.5}
+.posx-block .mini-btn{align-self:flex-start;height:28px;padding:0 10px}
 
-/* 실행 기록 / 콘솔 */
-:root[data-theme="light"] .run-item{color:#3d4852;border-bottom-color:rgba(0,0,0,.07)}
-:root[data-theme="light"] .run-item button{color:var(--text)}
-:root[data-theme="light"] .log-row{color:var(--text)}
-:root[data-theme="light"] .log-row:hover{background:rgba(0,0,0,.03)}
-:root[data-theme="light"] .stdin-bar.waiting{background:#fff4dd}
-:root[data-theme="light"] .latency-bars i,
-:root[data-theme="light"] .latency-bars i:nth-last-child(-n+4){background:#cfd6dc}
-:root[data-theme="light"] .latency-bars i:last-child{background:#8d99a4}
+/* 로그 전체 보기: 로그 카드만 화면 가득 (Esc 는 비상 정지라 닫기는 같은 버튼) */
+.event-console.log-full{position:fixed;inset:12px;height:auto!important;min-height:0!important;z-index:900;display:flex;flex-direction:column;background:var(--panel,#1d2022);border:1px solid var(--line,#383d40);border-radius:10px;box-shadow:0 12px 40px rgba(0,0,0,.5)}
+.event-console.log-full .console-log{flex:1;max-height:none;min-height:0}
+#logFullBtn{border-color:var(--accent,#ff7a1a)}
 
-/* 경고 팝업 / 토스트 */
-:root[data-theme="light"] .alert-pop{background:#fff7e6;border-color:#e3c27a;border-left-color:var(--amber);box-shadow:0 6px 20px rgba(0,0,0,.15)!important}
-:root[data-theme="light"] .alert-pop.error{background:#fdecec;border-color:#e0a0a0;border-left-color:var(--red)}
-:root[data-theme="light"] .alert-pop.error .alert-head b{color:#b42323}
-:root[data-theme="light"] .alert-src,
-:root[data-theme="light"] .alert-close{color:#3d4852}
-:root[data-theme="light"] .alert-close:hover{color:#000}
-:root[data-theme="light"] .alert-raw{background:#fff;border-color:var(--line);color:var(--text)}
-:root[data-theme="light"] .alert-foot button,
-:root[data-theme="light"] .alert-clear{background:#fff;border-color:#bcc6cf;color:var(--text)}
-:root[data-theme="light"] .toast{background:#fdecec;border-color:#e0a0a0;color:#a02020;box-shadow:0 6px 20px rgba(0,0,0,.15)!important}
-:root[data-theme="light"] .toast.warn{background:#fff7e6;border-color:#e3c27a;color:#7a4f00}
-:root[data-theme="light"] .toast.info{background:var(--panel-2);border-color:var(--line);color:var(--text)}
+/* --- 예/아니요 확인 팝업 (화면 정중앙, <dialog> 기본 위치) --- */
+.ask-dlg{border:1px solid var(--orange);background:var(--panel);color:var(--text);padding:20px 22px;min-width:340px;max-width:min(480px,90vw);box-shadow:0 12px 40px rgba(0,0,0,.5)}
+.ask-dlg::backdrop{background:rgba(0,0,0,.55)}
+.ask-dlg p{margin:0 0 18px;font-size:14px;line-height:1.55;white-space:pre-line}
+.ask-btns{display:flex;gap:10px;justify-content:flex-end}
+.ask-btns button{min-width:90px;height:34px;border:1px solid var(--line);background:var(--panel-2);color:var(--text);font-size:13px;font-weight:700;cursor:pointer}
+.ask-btns button.yes{border-color:#875622;background:#3e311e;color:#ffb66d}
+.ask-btns button:hover{border-color:var(--orange)}
 
-/* 작업 공간 뷰 (SVG) */
-:root[data-theme="light"] .simulation-card.focused{box-shadow:0 0 0 9999px rgba(0,0,0,.35)}
-:root[data-theme="light"] .viz-panel,
-:root[data-theme="light"] .viz-arm{background:#eef1f4}
-:root[data-theme="light"] .viz-panel .g,
-:root[data-theme="light"] .viz-arm .g{stroke:rgba(0,0,0,.07)}
-:root[data-theme="light"] .viz-panel .g.axis,
-:root[data-theme="light"] .viz-arm .g.axis{stroke:rgba(0,0,0,.22)}
-:root[data-theme="light"] .viz-panel .reach{stroke:rgba(217,96,15,.45)}
-:root[data-theme="light"] .viz-panel .trail,
-:root[data-theme="light"] .viz-arm .trail{stroke:#7d8791}
-:root[data-theme="light"] .viz-panel .arm{stroke:rgba(0,0,0,.22)}
-:root[data-theme="light"] .viz-panel .lbl,
-:root[data-theme="light"] .map-corner{fill:#6b7681;color:#6b7681}
-:root[data-theme="light"] .viz-panel .nodata,
-:root[data-theme="light"] .viz-arm .nodata,
-:root[data-theme="light"] .viz-arm .lbl,
-:root[data-theme="light"] .viz-arm .axis-arrow,
-:root[data-theme="light"] .viz-arm .axis-head{fill:#6b7681;stroke:#6b7681}
-:root[data-theme="light"] .viz-arm .lbl,
-:root[data-theme="light"] .viz-arm .axis-head,
-:root[data-theme="light"] .viz-panel .nodata,
-:root[data-theme="light"] .viz-arm .nodata{stroke:none}
-:root[data-theme="light"] .viz-arm .axis-l{fill:#3d4852;stroke:none}
-:root[data-theme="light"] .viz-arm .base-plate{fill:#dde2e7;stroke:#9aa5b0}
-:root[data-theme="light"] .viz-arm .arm-shadow{stroke:rgba(0,0,0,.1)}
-:root[data-theme="light"] .viz-arm .link{stroke:#5b6670}
-:root[data-theme="light"] .viz-arm .joint{fill:#fff;stroke:#2d3742}
-:root[data-theme="light"] .viz-arm .joint-l{fill:#3d4852}
-:root[data-theme="light"] .joint-bar{background:#d3dae1}
-:root[data-theme="light"] .joint-bar:before{background:#9aa5b0}
-:root[data-theme="light"] .joint-row b{color:var(--text)}
-
-/* ===== 화이트 모드 보강 (styles.css 에 직접 적힌 색 중 hmi.css 가 안 덮은 것) ===== */
-:root[data-theme="light"] .rail-header{border-bottom-color:var(--line)}
-:root[data-theme="light"] .eyebrow{color:var(--muted)}
-:root[data-theme="light"] .muted,
-:root[data-theme="light"] .safety-list span,
-:root[data-theme="light"] .log-source,
-:root[data-theme="light"] .log-row time{color:var(--muted)}
-:root[data-theme="light"] .operator-chip{border-left-color:var(--line)}
-:root[data-theme="light"] .progress-track{background:#d9dfe5}
-:root[data-theme="light"] .progress-track span{background:var(--orange)}
-:root[data-theme="light"] .progress-track i{background:var(--orange-2)}
-:root[data-theme="light"] .device-row:hover{background:rgba(0,0,0,.04)}
-:root[data-theme="light"] .comm-cell b,
-:root[data-theme="light"] .position-values b,
-:root[data-theme="light"] .command-card b,
-:root[data-theme="light"] .footer-stat b,
-:root[data-theme="light"] .console-footer b{color:var(--text)}
-:root[data-theme="light"] .comm-cell span:not(.link-dot),
-:root[data-theme="light"] .position-values small,
-:root[data-theme="light"] .sensor-reading span:not(.sensor-icon){color:var(--muted)}
-:root[data-theme="light"] .sensor-chart{background:repeating-linear-gradient(90deg,transparent 0,transparent 38px,rgba(0,0,0,.05) 39px),linear-gradient(180deg,transparent 49%,#c3cad1 50%,transparent 51%)}
-:root[data-theme="light"] .queue-track i{background:#d3dae1}
-:root[data-theme="light"] .mission-id .sep,
-:root[data-theme="light"] .app-footer b{color:var(--dim)}
-:root[data-theme="light"] .console-divider{background:var(--line)}
-
-/* 알림이 없을 때 빈 동그라미가 보이던 문제 (hidden 속성이 display:grid 에 눌렸음) */
-.page-badge[hidden]{display:none}
+/* 그리퍼 열기/닫기 (홈 버튼과 같은 모양) */
+.action-btn.grip{background:transparent;color:var(--text);border-color:#474c4f}
+.action-btn.grip:hover{border-color:#6a7073}
+.action-btn.grip:disabled{opacity:.35}

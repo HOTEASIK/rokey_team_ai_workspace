@@ -1,0 +1,25 @@
+# 퍼티 작업 (putty_task_server, /dsr01/putty_task)
+# ※ 퍼티 팀원 코드(putty_task_server.py / putty_task_client.py)의 사용 필드로 다시 만든 정의.
+#    팀원 원본 .action 이 오면 그것으로 교체할 것.
+# ── Goal ─────────────────────────────────────────────
+string   task                  # initialize / pickup / scoop / load / apply / return
+bool     virtual_mode
+bool     tool_held_confirmed   # 실물 scoop/load 전 헤라 파지를 사람이 확인했는지
+string[] arguments             # 작업별 기존 CLI 옵션
+---
+# ── Result ───────────────────────────────────────────
+bool   success
+string message
+int32  exit_code
+bool   stop_confirmed
+---
+# ── Feedback ─────────────────────────────────────────
+string     task
+string     stage
+float64    elapsed_sec
+float64    progress            # 모르면 -1, 성공 시 1
+string     log_line
+bool       pose_valid
+float64[6] tcp_pose
+bool       force_valid
+float64[6] tool_force
